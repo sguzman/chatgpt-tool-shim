@@ -1,0 +1,19 @@
+{
+  "name": "chatgpt-tool-shim",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Client-side pseudo-tool-calling bridge for ChatGPT web.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "clean": "rm -rf dist",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.269",
+    "esbuild": "^0.25.4",
+    "typescript": "^5.8.3",
+    "vite": "^5.4.21",
+    "vitest": "^2.1.8"
+  }
+}
