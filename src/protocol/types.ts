@@ -91,5 +91,6 @@ export type RuntimeMessage =
   | { type: "GET_SETTINGS" }
   | { type: "UPDATE_SETTINGS"; patch: Partial<ExtensionSettings> }
   | { type: "GET_AUDIT_LOG" }
+  | { type: "APPEND_AUDIT_LOG"; entry: AuditLogEntry }
   | { type: "PREPARE_TOOL_CALL"; call: ParsedToolCall; source: ToolRequestSource }
   | { type: "EXECUTE_TOOL_CALL"; request: ToolRequest };

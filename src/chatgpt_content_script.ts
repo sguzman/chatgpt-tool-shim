@@ -53,6 +53,25 @@ async function insertErrorResult(request: ToolRequest, code: string, message: st
   await insertResultText(text);
 }
 
+async function appendAuditEntry(
+  request: ToolRequest,
+  outcome: "success" | "error" | "denied",
+  detail: string
+) {
+  await sendMessage({
+    type: "APPEND_AUDIT_LOG",
+    entry: {
+      id: request.id,
+      timestamp: new Date().toISOString(),
+      toolName: request.name,
+      argsSummary: JSON.stringify(request.args),
+      target: request.source.chatUrl,
+      outcome,
+      detail
+    }
+  });
+}
+
 async function executeRequest(request: ToolRequest) {
   overlay.clearConfirmation();
   overlay.setStatus({ state: "running", lastTool: request.name, lastError: "none" });
@@ -103,6 +122,14 @@ async function processLatestAssistantMessage() {
 
   if (!preparation.ok) {
     overlay.setStatus({ state: "error", lastError: preparation.message, lastTool: parsed.name });
+    const failedRequest: ToolRequest = {
+      id: parsed.id,
+      name: parsed.name as ToolRequest["name"],
+      args: parsed.args,
+      source
+    };
+    await appendAuditEntry(failedRequest, "denied", `${preparation.code}: ${preparation.message}`);
+    await insertErrorResult(failedRequest, preparation.code, preparation.message);
     return;
   }
 
@@ -183,6 +210,7 @@ async function init() {
       overlay.clearConfirmation();
       overlay.setStatus({ state: "watching", lastError: "User denied execution." });
       if (current) {
+        void appendAuditEntry(current.request, "denied", "User denied tool execution.");
         void insertErrorResult(current.request, "USER_DENIED", "User denied tool execution.");
       }
     }

@@ -27,6 +27,20 @@ function makeAuditEntry(
   };
 }
 
+function enrichRequestSource(
+  request: ToolRequest,
+  sender: chrome.runtime.MessageSender
+): ToolRequest {
+  return {
+    ...request,
+    source: {
+      ...request.source,
+      chatTabId: sender.tab?.id ?? request.source.chatTabId,
+      chatUrl: sender.tab?.url ?? request.source.chatUrl
+    }
+  };
+}
+
 async function prepareToolCall(request: ToolRequest): Promise<PrepareToolResponse> {
   const settings = await getSettings();
   if (!settings.enabled) {
@@ -127,18 +141,29 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
         case "GET_AUDIT_LOG":
           sendResponse(await getAuditLog());
           return;
+        case "APPEND_AUDIT_LOG": {
+          const settings = await getSettings();
+          await appendAuditLog(message.entry, settings);
+          sendResponse({ ok: true });
+          return;
+        }
         case "PREPARE_TOOL_CALL":
           sendResponse(
-            await prepareToolCall({
-              id: message.call.id,
-              name: message.call.name as ToolRequest["name"],
-              args: message.call.args,
-              source: message.source
-            })
+            await prepareToolCall(
+              enrichRequestSource(
+                {
+                  id: message.call.id,
+                  name: message.call.name as ToolRequest["name"],
+                  args: message.call.args,
+                  source: message.source
+                },
+                _sender
+              )
+            )
           );
           return;
         case "EXECUTE_TOOL_CALL": {
-          const result = await executeToolCall(message.request);
+          const result = await executeToolCall(enrichRequestSource(message.request, _sender));
           sendResponse({ ...result, formatted: formatToolResult(result) });
           return;
         }
