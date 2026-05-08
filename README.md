@@ -102,7 +102,12 @@ Do not invent tool results.
 
 ## Planned Tool Set
 
-Phase 1 tools:
+Phase 1 starter pseudo-MCP tools:
+
+- `hello`
+- `clock`
+
+Phase 1 extension tools:
 
 - `clock.now`
 - `browser.tabs.list`
@@ -188,6 +193,13 @@ The build outputs `dist/manifest.json`, `dist/chatgpt_content_script.js`, and `d
 5. Add browser tab tools.
 6. Add audit log, persisted settings, and manual debugging affordances.
 7. Add the optional localhost bridge as Phase 2.
+
+The project plan also reserves two very simple pseudo-MCP starter tools for the protocol layer:
+
+- `hello`
+  Returns a trivial hello-style payload for smoke-testing the end-to-end loop.
+- `clock`
+  Returns the current local time in the browser timezone.
 
 ## Plan Reference
 

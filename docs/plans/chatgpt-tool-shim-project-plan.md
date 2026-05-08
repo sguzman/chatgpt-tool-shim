@@ -119,6 +119,15 @@ Generate a call ID when the model omits one. Preserve it when present.
 
 ### Initial tools
 
+Starter pseudo-MCP tools to include in the plan:
+
+1. `hello`
+   Returns a trivial hello/echo payload for end-to-end smoke testing.
+2. `clock`
+   Returns the current local time and browser timezone in a simpler pseudo-MCP shape.
+
+Phase 1 extension tools:
+
 1. `clock.now`
 2. `browser.tabs.list`
 3. `browser.tab.metadata`
