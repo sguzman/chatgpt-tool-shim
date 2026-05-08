@@ -1,17 +1,43 @@
 export function findComposer(): HTMLElement | HTMLTextAreaElement | null {
-  return (
-    document.querySelector<HTMLTextAreaElement>("textarea") ||
-    document.querySelector<HTMLElement>('[contenteditable="true"][role="textbox"]') ||
-    document.querySelector<HTMLElement>('[contenteditable="true"]')
-  );
+  const selectors = [
+    "textarea",
+    'textarea[placeholder*="Ask"]',
+    'textarea[placeholder*="Message"]',
+    '[contenteditable="true"][role="textbox"]',
+    '[contenteditable="true"][data-testid*="composer"]',
+    '[contenteditable="true"][id*="prompt"]',
+    '[contenteditable="true"][placeholder*="Ask"]',
+    '[contenteditable="true"][aria-label*="Message"]',
+    '[contenteditable="true"]'
+  ];
+
+  for (const selector of selectors) {
+    const element = document.querySelector<HTMLElement | HTMLTextAreaElement>(selector);
+    if (element) {
+      return element;
+    }
+  }
+
+  return null;
 }
 
 export function findSubmitButton(): HTMLButtonElement | null {
-  return (
-    document.querySelector<HTMLButtonElement>('button[data-testid*="send"]') ||
-    document.querySelector<HTMLButtonElement>('button[aria-label*="Send"]') ||
-    document.querySelector<HTMLButtonElement>("form button:last-of-type")
-  );
+  const selectors = [
+    'button[data-testid*="send"]',
+    'button[aria-label*="Send"]',
+    'button[aria-label*="send"]',
+    'form button[type="submit"]',
+    "form button:last-of-type"
+  ];
+
+  for (const selector of selectors) {
+    const button = document.querySelector<HTMLButtonElement>(selector);
+    if (button) {
+      return button;
+    }
+  }
+
+  return null;
 }
 
 export function findAssistantMessages(): HTMLElement[] {

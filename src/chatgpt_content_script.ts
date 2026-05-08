@@ -48,6 +48,18 @@ function insertPlainText(text: string) {
   insertIntoComposer(text);
 }
 
+function safeInsertPlainText(text: string, label: string) {
+  try {
+    insertPlainText(text);
+    overlay.setStatus({ state: "watching", lastError: "none" });
+  } catch (error) {
+    overlay.setStatus({
+      state: "error",
+      lastError: `${label}: ${error instanceof Error ? error.message : "Insert failed."}`
+    });
+  }
+}
+
 async function insertErrorResult(request: ToolRequest, code: string, message: string) {
   const text = formatToolResult({
     id: request.id,
@@ -203,16 +215,16 @@ async function init() {
       void openLog();
     },
     onInsertPrompt: () => {
-      insertPlainText(buildPrimingPrompt());
+      safeInsertPlainText(buildPrimingPrompt(), "Insert prompt failed");
     },
     onInsertToolCatalog: () => {
-      insertPlainText(buildToolCatalogText());
+      safeInsertPlainText(buildToolCatalogText(), "Insert tools failed");
     },
     onInsertHelloCall: () => {
-      insertPlainText('<tool_call name="hello">\n{}\n</tool_call>');
+      safeInsertPlainText('<tool_call name="hello">\n{}\n</tool_call>', "Insert hello failed");
     },
     onInsertClockCall: () => {
-      insertPlainText('<tool_call name="clock">\n{}\n</tool_call>');
+      safeInsertPlainText('<tool_call name="clock">\n{}\n</tool_call>', "Insert clock failed");
     },
     onConfirmRequest: () => {
       const current = pendingConfirmation;

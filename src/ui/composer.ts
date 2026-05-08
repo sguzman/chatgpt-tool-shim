@@ -1,6 +1,7 @@
 import { findComposer, findSubmitButton } from "./selectors";
 
 function dispatchInput(element: HTMLElement | HTMLTextAreaElement) {
+  element.dispatchEvent(new Event("focus", { bubbles: true }));
   element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
@@ -12,14 +13,31 @@ export function insertIntoComposer(text: string) {
   }
 
   if (composer instanceof HTMLTextAreaElement) {
+    composer.focus();
     const next = composer.value.trim() ? `${composer.value}\n\n${text}` : text;
-    composer.value = next;
+    const descriptor = Object.getOwnPropertyDescriptor(
+      window.HTMLTextAreaElement.prototype,
+      "value"
+    );
+    descriptor?.set?.call(composer, next);
     dispatchInput(composer);
     return;
   }
 
-  const next = composer.textContent?.trim() ? `${composer.textContent}\n\n${text}` : text;
-  composer.textContent = next;
+  composer.focus();
+  const current = composer.textContent?.trim() ?? "";
+  const next = current ? `${current}\n\n${text}` : text;
+
+  if (document.activeElement !== composer) {
+    composer.focus();
+  }
+
+  // Prefer the editing command path first because many composer implementations
+  // are wired to browser editing events rather than direct DOM mutation.
+  const inserted = document.execCommand?.("insertText", false, next);
+  if (!inserted) {
+    composer.textContent = next;
+  }
   dispatchInput(composer);
 }
 
