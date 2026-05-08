@@ -48,12 +48,21 @@ export function findSubmitButton(): HTMLButtonElement | null {
     'button[data-testid*="send"]',
     'button[aria-label*="Send"]',
     'button[aria-label*="send"]',
+    'button[aria-label*="Submit"]',
+    'button[aria-label*="submit"]',
+    'button[data-testid*="submit"]',
+    'button svg',
     'form button[type="submit"]',
     "form button:last-of-type"
   ];
 
   for (const selector of selectors) {
-    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(selector));
+    const buttons =
+      selector === "button svg"
+        ? Array.from(document.querySelectorAll<SVGElement>(selector))
+            .map((svg) => svg.closest("button"))
+            .filter((button): button is HTMLButtonElement => button instanceof HTMLButtonElement)
+        : Array.from(document.querySelectorAll<HTMLButtonElement>(selector));
     const button = buttons.find((candidate) => isVisibleElement(candidate) && !candidate.disabled);
     if (button) {
       return button;

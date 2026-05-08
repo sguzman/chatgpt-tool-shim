@@ -56,10 +56,30 @@ export function insertIntoComposer(text: string) {
 }
 
 export function submitComposer(): boolean {
+  const composer = findComposer();
   const button = findSubmitButton();
-  if (!button || button.disabled) {
+  if (button && !button.disabled) {
+    button.click();
+    return true;
+  }
+
+  if (!composer) {
     return false;
   }
-  button.click();
+
+  composer.focus();
+
+  const keyOptions: KeyboardEventInit = {
+    bubbles: true,
+    cancelable: true,
+    key: "Enter",
+    code: "Enter",
+    keyCode: 13,
+    which: 13
+  };
+
+  composer.dispatchEvent(new KeyboardEvent("keydown", keyOptions));
+  composer.dispatchEvent(new KeyboardEvent("keypress", keyOptions));
+  composer.dispatchEvent(new KeyboardEvent("keyup", keyOptions));
   return true;
 }
