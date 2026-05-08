@@ -44,6 +44,10 @@ async function insertResultText(text: string) {
   }
 }
 
+function insertPlainText(text: string) {
+  insertIntoComposer(text);
+}
+
 async function insertErrorResult(request: ToolRequest, code: string, message: string) {
   const text = formatToolResult({
     id: request.id,
@@ -199,10 +203,16 @@ async function init() {
       void openLog();
     },
     onInsertPrompt: () => {
-      void insertResultText(buildPrimingPrompt());
+      insertPlainText(buildPrimingPrompt());
     },
     onInsertToolCatalog: () => {
-      void insertResultText(buildToolCatalogText());
+      insertPlainText(buildToolCatalogText());
+    },
+    onInsertHelloCall: () => {
+      insertPlainText('<tool_call name="hello">\n{}\n</tool_call>');
+    },
+    onInsertClockCall: () => {
+      insertPlainText('<tool_call name="clock">\n{}\n</tool_call>');
     },
     onConfirmRequest: () => {
       const current = pendingConfirmation;

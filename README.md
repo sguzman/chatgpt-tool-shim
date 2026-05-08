@@ -100,7 +100,7 @@ After I provide a <tool_result>, continue normally.
 Do not invent tool results.
 ```
 
-A ready-to-paste version also lives at [docs/prompts/chatgpt-priming-prompt.md](docs/prompts/chatgpt-priming-prompt.md). The overlay can insert both the priming prompt and the tool catalog directly into the composer.
+A ready-to-paste version also lives at [docs/prompts/chatgpt-priming-prompt.md](docs/prompts/chatgpt-priming-prompt.md). The overlay can insert the priming prompt, the tool catalog, and sample `hello` / `clock` tool calls directly into the composer.
 
 Starter smoke-test calls:
 
@@ -215,6 +215,8 @@ or:
 8. Toggle `Auto Submit` on and repeat to verify automatic submission.
 9. Test `browser.tabs.list`, `browser.tab.metadata`, `browser.tab.links`, and `browser.tab.read_text`.
 10. Verify `browser.tab.read_text` prompts for confirmation and respects blocked domains.
+
+For quick manual testing, the overlay also has `Insert Hello` and `Insert Clock` buttons that paste canonical tool calls without submitting them.
 
 ## Roadmap
 

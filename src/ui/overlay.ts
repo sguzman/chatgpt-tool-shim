@@ -8,6 +8,8 @@ type OverlayCallbacks = {
   onRequestLog: () => void;
   onInsertPrompt: () => void;
   onInsertToolCatalog: () => void;
+  onInsertHelloCall: () => void;
+  onInsertClockCall: () => void;
   onConfirmRequest: () => void;
   onCancelRequest: () => void;
 };
@@ -105,6 +107,8 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
       <div class="buttons">
         <button id="insert-prompt" class="secondary">Insert Prompt</button>
         <button id="insert-tools" class="secondary">Insert Tools</button>
+        <button id="insert-hello" class="secondary">Insert Hello</button>
+        <button id="insert-clock" class="secondary">Insert Clock</button>
         <button id="show-log" class="secondary">Open Log</button>
       </div>
     </div>
@@ -139,6 +143,12 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
   });
   panel.querySelector<HTMLButtonElement>("#insert-tools")!.addEventListener("click", () => {
     callbacks.onInsertToolCatalog();
+  });
+  panel.querySelector<HTMLButtonElement>("#insert-hello")!.addEventListener("click", () => {
+    callbacks.onInsertHelloCall();
+  });
+  panel.querySelector<HTMLButtonElement>("#insert-clock")!.addEventListener("click", () => {
+    callbacks.onInsertClockCall();
   });
   panel.querySelector<HTMLButtonElement>("#confirm-run")!.addEventListener("click", () => {
     callbacks.onConfirmRequest();
