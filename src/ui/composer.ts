@@ -2,6 +2,9 @@ import { findComposer, findSubmitButton } from "./selectors";
 
 function dispatchInput(element: HTMLElement | HTMLTextAreaElement) {
   element.dispatchEvent(new Event("focus", { bubbles: true }));
+  element.dispatchEvent(
+    new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText" })
+  );
   element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
@@ -32,9 +35,20 @@ export function insertIntoComposer(text: string) {
     composer.focus();
   }
 
-  // Prefer the editing command path first because many composer implementations
-  // are wired to browser editing events rather than direct DOM mutation.
-  const inserted = document.execCommand?.("insertText", false, next);
+  const selection = window.getSelection();
+  if (selection) {
+    const range = document.createRange();
+    range.selectNodeContents(composer);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  // Prefer appending just the requested text into the live editor rather than
+  // replacing the whole content, because modern composer UIs often bind to the
+  // editing transaction instead of raw textContent changes.
+  const prefix = current ? "\n\n" : "";
+  const inserted = document.execCommand?.("insertText", false, `${prefix}${text}`);
   if (!inserted) {
     composer.textContent = next;
   }

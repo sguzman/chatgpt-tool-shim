@@ -1,18 +1,40 @@
+function isVisibleElement(element: Element): boolean {
+  if (!(element instanceof HTMLElement)) {
+    return false;
+  }
+
+  const style = window.getComputedStyle(element);
+  if (style.display === "none" || style.visibility === "hidden") {
+    return false;
+  }
+
+  if (element.getAttribute("aria-hidden") === "true") {
+    return false;
+  }
+
+  return element.getClientRects().length > 0;
+}
+
 export function findComposer(): HTMLElement | HTMLTextAreaElement | null {
   const selectors = [
-    "textarea",
-    'textarea[placeholder*="Ask"]',
-    'textarea[placeholder*="Message"]',
     '[contenteditable="true"][role="textbox"]',
+    '[contenteditable="true"][data-lexical-editor="true"]',
+    '[contenteditable="true"][contenteditable="true"]',
     '[contenteditable="true"][data-testid*="composer"]',
     '[contenteditable="true"][id*="prompt"]',
     '[contenteditable="true"][placeholder*="Ask"]',
     '[contenteditable="true"][aria-label*="Message"]',
-    '[contenteditable="true"]'
+    '[contenteditable="true"]',
+    'textarea[placeholder*="Ask"]',
+    'textarea[placeholder*="Message"]',
+    "textarea"
   ];
 
   for (const selector of selectors) {
-    const element = document.querySelector<HTMLElement | HTMLTextAreaElement>(selector);
+    const elements = Array.from(
+      document.querySelectorAll<HTMLElement | HTMLTextAreaElement>(selector)
+    );
+    const element = elements.find((candidate) => isVisibleElement(candidate));
     if (element) {
       return element;
     }
@@ -31,7 +53,8 @@ export function findSubmitButton(): HTMLButtonElement | null {
   ];
 
   for (const selector of selectors) {
-    const button = document.querySelector<HTMLButtonElement>(selector);
+    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(selector));
+    const button = buttons.find((candidate) => isVisibleElement(candidate) && !candidate.disabled);
     if (button) {
       return button;
     }
