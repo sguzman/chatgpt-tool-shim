@@ -100,6 +100,20 @@ After I provide a <tool_result>, continue normally.
 Do not invent tool results.
 ```
 
+Starter smoke-test calls:
+
+```xml
+<tool_call name="hello">
+{}
+</tool_call>
+```
+
+```xml
+<tool_call name="clock">
+{}
+</tool_call>
+```
+
 ## Planned Tool Set
 
 Phase 1 starter pseudo-MCP tools:
@@ -171,7 +185,23 @@ The build outputs `dist/manifest.json`, `dist/chatgpt_content_script.js`, and `d
 2. Open `https://chatgpt.com/`.
 3. Confirm the `Tool Shim` overlay appears.
 4. Paste the priming prompt from this README into ChatGPT.
-5. Ask for the current time and steer the model to emit:
+5. Start with a simple smoke test by steering the model to emit:
+
+```xml
+<tool_call name="hello">
+{}
+</tool_call>
+```
+
+6. Ask for the current time and steer the model to emit:
+
+```xml
+<tool_call name="clock">
+{}
+</tool_call>
+```
+
+or:
 
 ```xml
 <tool_call name="clock.now">
@@ -179,10 +209,10 @@ The build outputs `dist/manifest.json`, `dist/chatgpt_content_script.js`, and `d
 </tool_call>
 ```
 
-6. Verify the extension inserts a `<tool_result>` block into the composer.
-7. Toggle `Auto Submit` on and repeat to verify automatic submission.
-8. Test `browser.tabs.list`, `browser.tab.metadata`, `browser.tab.links`, and `browser.tab.read_text`.
-9. Verify `browser.tab.read_text` prompts for confirmation and respects blocked domains.
+7. Verify the extension inserts a `<tool_result>` block into the composer.
+8. Toggle `Auto Submit` on and repeat to verify automatic submission.
+9. Test `browser.tabs.list`, `browser.tab.metadata`, `browser.tab.links`, and `browser.tab.read_text`.
+10. Verify `browser.tab.read_text` prompts for confirmation and respects blocked domains.
 
 ## Roadmap
 
@@ -200,6 +230,8 @@ The project plan also reserves two very simple pseudo-MCP starter tools for the 
   Returns a trivial hello-style payload for smoke-testing the end-to-end loop.
 - `clock`
   Returns the current local time in the browser timezone.
+
+They are now intended to be real implemented starter tools, not documentation-only placeholders.
 
 ## Plan Reference
 

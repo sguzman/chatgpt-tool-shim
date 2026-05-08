@@ -1,4 +1,6 @@
 export type ToolName =
+  | "hello"
+  | "clock"
   | "clock.now"
   | "browser.tabs.list"
   | "browser.tab.metadata"

@@ -59,6 +59,26 @@ describe("formatToolResult", () => {
 });
 
 describe("validateToolRequest", () => {
+  test("normalizes hello args", () => {
+    const request = validateToolRequest({
+      id: "1",
+      name: "hello",
+      args: {},
+      source: { chatTabId: 1, chatUrl: "https://chatgpt.com", assistantMessageKey: "a" }
+    });
+    expect(request.args).toEqual({});
+  });
+
+  test("normalizes clock args", () => {
+    const request = validateToolRequest({
+      id: "1",
+      name: "clock",
+      args: {},
+      source: { chatTabId: 1, chatUrl: "https://chatgpt.com", assistantMessageKey: "a" }
+    });
+    expect(request.args).toEqual({});
+  });
+
   test("normalizes browser.tabs.list defaults", () => {
     const request = validateToolRequest({
       id: "1",

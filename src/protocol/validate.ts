@@ -1,6 +1,8 @@
 import type { ToolName, ToolRequest } from "./types";
 
 const KNOWN_TOOLS: ToolName[] = [
+  "hello",
+  "clock",
   "clock.now",
   "browser.tabs.list",
   "browser.tab.metadata",
@@ -51,6 +53,8 @@ export function validateToolRequest(request: ToolRequest): ToolRequest {
 
   const args = requireObject(request.args);
   switch (request.name) {
+    case "hello":
+    case "clock":
     case "clock.now":
       request.args = {};
       break;

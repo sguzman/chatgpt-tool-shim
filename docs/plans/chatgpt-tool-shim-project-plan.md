@@ -126,6 +126,8 @@ Starter pseudo-MCP tools to include in the plan:
 2. `clock`
    Returns the current local time and browser timezone in a simpler pseudo-MCP shape.
 
+These starter tools should be implemented as first-class valid tool calls, not just documented aliases.
+
 Phase 1 extension tools:
 
 1. `clock.now`
