@@ -6,6 +6,8 @@ type OverlayCallbacks = {
   onToggleAutoRun: (enabled: boolean) => void;
   onToggleAutoSubmit: (enabled: boolean) => void;
   onRequestLog: () => void;
+  onInsertPrompt: () => void;
+  onInsertToolCatalog: () => void;
   onConfirmRequest: () => void;
   onCancelRequest: () => void;
 };
@@ -100,7 +102,11 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
       <div class="row"><span>Status</span><span id="status-text" class="muted">idle</span></div>
       <div class="row"><span>Last Tool</span><span id="last-tool" class="muted">none</span></div>
       <div class="row"><span>Last Error</span><span id="last-error" class="muted">none</span></div>
-      <div class="buttons"><button id="show-log" class="secondary">Open Log</button></div>
+      <div class="buttons">
+        <button id="insert-prompt" class="secondary">Insert Prompt</button>
+        <button id="insert-tools" class="secondary">Insert Tools</button>
+        <button id="show-log" class="secondary">Open Log</button>
+      </div>
     </div>
     <div id="confirm" class="confirm" style="display:none">
       <div id="confirm-text"></div>
@@ -127,6 +133,12 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
 
   panel.querySelector<HTMLButtonElement>("#show-log")!.addEventListener("click", () => {
     callbacks.onRequestLog();
+  });
+  panel.querySelector<HTMLButtonElement>("#insert-prompt")!.addEventListener("click", () => {
+    callbacks.onInsertPrompt();
+  });
+  panel.querySelector<HTMLButtonElement>("#insert-tools")!.addEventListener("click", () => {
+    callbacks.onInsertToolCatalog();
   });
   panel.querySelector<HTMLButtonElement>("#confirm-run")!.addEventListener("click", () => {
     callbacks.onConfirmRequest();

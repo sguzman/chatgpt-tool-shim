@@ -100,6 +100,8 @@ After I provide a <tool_result>, continue normally.
 Do not invent tool results.
 ```
 
+A ready-to-paste version also lives at [docs/prompts/chatgpt-priming-prompt.md](docs/prompts/chatgpt-priming-prompt.md). The overlay can insert both the priming prompt and the tool catalog directly into the composer.
+
 Starter smoke-test calls:
 
 ```xml
@@ -184,7 +186,7 @@ The build outputs `dist/manifest.json`, `dist/chatgpt_content_script.js`, and `d
 1. Load the unpacked extension from `dist/`.
 2. Open `https://chatgpt.com/`.
 3. Confirm the `Tool Shim` overlay appears.
-4. Paste the priming prompt from this README into ChatGPT.
+4. Paste the priming prompt from this README into ChatGPT, use [docs/prompts/chatgpt-priming-prompt.md](docs/prompts/chatgpt-priming-prompt.md), or click `Insert Prompt` in the overlay.
 5. Start with a simple smoke test by steering the model to emit:
 
 ```xml

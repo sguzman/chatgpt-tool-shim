@@ -1,5 +1,6 @@
 import { formatToolResult } from "./protocol/format_tool_result";
 import { parseLatestToolCall } from "./protocol/parse_tool_calls";
+import { buildPrimingPrompt, buildToolCatalogText } from "./protocol/tool_catalog";
 import type {
   AuditLogEntry,
   ExtensionSettings,
@@ -196,6 +197,12 @@ async function init() {
     },
     onRequestLog: () => {
       void openLog();
+    },
+    onInsertPrompt: () => {
+      void insertResultText(buildPrimingPrompt());
+    },
+    onInsertToolCatalog: () => {
+      void insertResultText(buildToolCatalogText());
     },
     onConfirmRequest: () => {
       const current = pendingConfirmation;

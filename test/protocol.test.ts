@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import { formatToolResult } from "../src/protocol/format_tool_result";
 import { hashString, parseLatestToolCall, stripFencedCodeBlocks } from "../src/protocol/parse_tool_calls";
+import { buildPrimingPrompt, buildToolCatalogText } from "../src/protocol/tool_catalog";
 import { validateToolRequest } from "../src/protocol/validate";
 
 describe("parseLatestToolCall", () => {
@@ -55,6 +56,21 @@ describe("formatToolResult", () => {
     });
     expect(text).toContain("<tool_result");
     expect(text).toContain('"ok": true');
+  });
+});
+
+describe("tool catalog", () => {
+  test("buildToolCatalogText includes starter tools", () => {
+    const text = buildToolCatalogText();
+    expect(text).toContain("hello");
+    expect(text).toContain("clock");
+    expect(text).toContain("browser.tab.read_text");
+  });
+
+  test("buildPrimingPrompt includes tool protocol", () => {
+    const text = buildPrimingPrompt();
+    expect(text).toContain("<tool_call name=\"TOOL_NAME\">");
+    expect(text).toContain("Available tools:");
   });
 });
 
