@@ -4,9 +4,11 @@
 
 Replace huge/manual result messages with reliable attachment delivery for large or file-native tool output.
 
-## Implementation note — 2026-08-22
+## Implementation note — 2026-08-23
 
-The restart branch now has an initial implementation for size-based routing, versioned JSON result envelopes, correlated filenames and `<tool_result_ref>` messages, synthetic `File` upload through ChatGPT's file input, a conservative attachment-ready wait, delivery-state tracing, and compact delivery errors. Runtime-sensitive boxes remain unchecked until the current ChatGPT UI verifies them.
+The restart branch has an initial implementation for size-based routing, versioned JSON result envelopes, correlated filenames and `<tool_result_ref>` messages, synthetic `File` upload through ChatGPT's file input, a conservative attachment-ready wait, delivery-state tracing, and compact delivery errors.
+
+A bounded `broker.large_result` capability now provides a deterministic attachment-test payload without exposing filesystem resources. It defaults to 64 KiB, accepts an explicit integer byte count, and rejects requests above 2 MiB. Unit coverage verifies the default, explicit sizes, and rejection bounds. Runtime-sensitive boxes remain unchecked until the current ChatGPT UI verifies the real upload path.
 
 ## Checklist
 
@@ -15,6 +17,7 @@ The restart branch now has an initial implementation for size-based routing, ver
 - [x] Include call ID in every result artifact.
 - [x] Generate human-readable attachment filenames.
 - [x] Create `File` objects in the content-script/page integration path.
+- [x] Add a bounded deterministic large-result broker test fixture.
 - [ ] Verify a stable ChatGPT file-input/upload path in current Edge.
 - [ ] Verify upload without user file-picker interaction.
 - [ ] Verify attachment upload start detection.
