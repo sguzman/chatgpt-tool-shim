@@ -6,7 +6,9 @@ Implement the first real localhost capability broker behind the extension.
 
 ## Implementation note — 2026-08-22
 
-The restart branch now contains a Node/TypeScript broker MVP under `server/`: loopback-only HTTP, bearer authentication, `/health`, authenticated capability discovery, `/v1/execute`, `/tool` compatibility, a capability registry, correlated call IDs, normalized errors, and starter `broker.hello`, `broker.clock`, and `system.runtime` capabilities. The extension now carries the call ID and bearer token to the broker and exposes a small **Configure Broker** control. Runtime-sensitive checklist items remain unchecked until a local Edge session verifies the complete loop.
+The restart branch now contains a Node/TypeScript broker MVP under `server/`: loopback-only HTTP, bearer authentication, `/health`, authenticated capability discovery, `/v1/execute`, `/tool` compatibility, a capability registry, correlated call IDs, normalized errors, and starter `broker.hello`, `broker.clock`, and `system.runtime` capabilities. The extension now carries the call ID and bearer token to the broker and exposes a small **Configure Broker** control.
+
+The first Windows runtime launch successfully started the built broker and reported `ChatGPT Tool Shim broker listening on http://127.0.0.1:3210`, confirming the packaged server starts and binds to loopback on the target machine. A generated ephemeral bearer token was also produced. End-to-end authenticated traffic is the next acceptance step.
 
 ## Checklist
 
