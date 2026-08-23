@@ -12,6 +12,8 @@ The first Windows runtime launch successfully started the built broker and repor
 
 The first live ChatGPT-originated `local.mcp.call` completed successfully after the explicit **Allow localhost bridge tool execution? [local.mcp.call]** confirmation. The call executed `broker.hello` through the authenticated loopback broker and returned a model-visible result without manual result copying. The same call ID (`call_9add5694`) was preserved by the extension and broker response, verifying end-to-end correlation across the model request, extension dispatch, broker execution, and result return.
 
+A second live broker call executed the useful read-only `system.runtime` capability and returned real local process information from the target Windows machine (`win32`, `x64`, Node `v24.18.0`, host `winbox`, and the repository working directory). This confirms the broker is executing native local capabilities rather than only returning synthetic protocol fixtures.
+
 ## Checklist
 
 - [x] Choose initial implementation language/runtime — Node 22 + TypeScript/esbuild.
