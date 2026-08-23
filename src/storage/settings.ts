@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   autoSubmitToolResults: false,
   localhostBridgeEnabled: false,
   localhostBridgeUrl: "http://127.0.0.1:3210/tool",
+  localhostBridgeToken: "",
   sensitiveDomainBlocklist: [
     "mail.google.com",
     "outlook.office.com",
@@ -19,7 +20,10 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
     "chrome://",
     "edge://"
   ],
-  maxAuditEntries: 200
+  maxAuditEntries: 200,
+  attachmentResultsEnabled: true,
+  attachmentThresholdBytes: 16 * 1024,
+  attachmentUploadTimeoutMs: 30_000
 };
 
 export async function getSettings(): Promise<ExtensionSettings> {

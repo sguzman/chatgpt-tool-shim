@@ -64,8 +64,12 @@ export type ExtensionSettings = {
   autoSubmitToolResults: boolean;
   localhostBridgeEnabled: boolean;
   localhostBridgeUrl: string;
+  localhostBridgeToken: string;
   sensitiveDomainBlocklist: string[];
   maxAuditEntries: number;
+  attachmentResultsEnabled: boolean;
+  attachmentThresholdBytes: number;
+  attachmentUploadTimeoutMs: number;
 };
 
 export type PrepareToolResponse =
