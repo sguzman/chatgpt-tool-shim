@@ -8,10 +8,12 @@ Verify and repair the existing extension against the current ChatGPT web UI befo
 
 The restart branch now contains the first revalidation hardening pass: composer/send selectors are scoped and ranked more conservatively, the overlay can export DOM/selector diagnostics, and tool calls keep an in-memory correlated state trace. These changes are implemented but runtime-sensitive boxes remain unchecked until verified in a real current ChatGPT session.
 
+On Windows, the first local acceptance run verified a clean `npm ci` and all 18 current tests. That run also exposed a cross-platform build-script bug caused by using URL `.pathname` values with esbuild; the scripts were patched to use Node's `fileURLToPath()` instead. The build checkbox remains open until the patched scripts are rerun successfully.
+
 ## Checklist
 
-- [ ] Clean install dependencies.
-- [ ] Run protocol tests.
+- [x] Clean install dependencies.
+- [x] Run protocol tests.
 - [ ] Build `dist/` successfully.
 - [ ] Load unpacked extension in current Edge.
 - [ ] Overlay appears on `chatgpt.com`.
