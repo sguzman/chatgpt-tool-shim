@@ -10,7 +10,7 @@ The restart branch now contains a Node/TypeScript broker MVP under `server/`: lo
 
 The first Windows runtime launch successfully started the built broker and reported `ChatGPT Tool Shim broker listening on http://127.0.0.1:3210`, confirming the packaged server starts and binds to loopback on the target machine. A generated ephemeral bearer token was also produced.
 
-In the first live ChatGPT-originated `local.mcp.call`, the extension detected the model request and entered its explicit confirmation state, rendering **Allow localhost bridge tool execution? [local.mcp.call]** with Run/Cancel controls. This verifies the model-to-extension dispatch and the intended human authorization boundary for localhost calls. Broker execution/result return remains unchecked until the pending request is approved and completes.
+The first live ChatGPT-originated `local.mcp.call` completed successfully after the explicit **Allow localhost bridge tool execution? [local.mcp.call]** confirmation. The call executed `broker.hello` through the authenticated loopback broker and returned a model-visible result without manual result copying. The same call ID (`call_9add5694`) was preserved by the extension and broker response, verifying end-to-end correlation across the model request, extension dispatch, broker execution, and result return.
 
 ## Checklist
 
@@ -32,8 +32,8 @@ In the first live ChatGPT-originated `local.mcp.call`, the extension detected th
 - [x] Return normalized errors.
 - [x] Update extension settings/UI for broker URL, token, and configuration status.
 - [ ] Add active extension broker-health indicator.
-- [ ] Route one ChatGPT-originated call through the broker end-to-end.
-- [ ] Return the result without manual copying in a real browser session.
+- [x] Route one ChatGPT-originated call through the broker end-to-end.
+- [x] Return the result without manual copying in a real browser session.
 - [x] Include broker health information in the debug bundle.
 
 ## Exit condition
