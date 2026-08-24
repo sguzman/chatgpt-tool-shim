@@ -239,6 +239,10 @@ type MainWorldSubmitResponse =
   | { ok: true; method: "main-world-click"; detail: string }
   | { ok: false; code: string; message: string };
 
+type FocusSubmitResponse =
+  | { ok: true; method: "focus-main-world-click"; detail: string }
+  | { ok: false; code: string; message: string };
+
 async function activateChatGptSubmitMainWorld(
   sender: chrome.runtime.MessageSender
 ): Promise<MainWorldSubmitResponse> {
@@ -327,8 +331,7 @@ async function activateChatGptSubmitMainWorld(
         ].join(", ");
 
         // Run the native HTMLElement click from ChatGPT's MAIN world rather than
-        // the extension's isolated content-script world. This is intentionally a
-        // narrow fallback for the already-authorized result-delivery transaction.
+        // the extension's isolated content-script world.
         button.click();
         return { ok: true as const, method: "main-world-click" as const, detail };
       }
@@ -348,6 +351,102 @@ async function activateChatGptSubmitMainWorld(
       code: "MAIN_WORLD_SUBMIT_ERROR",
       message: error instanceof Error ? error.message : "Main-world submit activation failed."
     };
+  }
+}
+
+async function activateChatGptSubmitWithFocus(
+  sender: chrome.runtime.MessageSender
+): Promise<FocusSubmitResponse> {
+  const tabId = sender.tab?.id;
+  if (tabId === undefined) {
+    return {
+      ok: false,
+      code: "NO_SENDER_TAB",
+      message: "Focus-assisted submit activation requires a ChatGPT sender tab."
+    };
+  }
+
+  const tab = await chrome.tabs.get(tabId);
+  if (!isChatGptUrl(tab.url ?? "")) {
+    return {
+      ok: false,
+      code: "INVALID_SUBMIT_TARGET",
+      message: "Focus-assisted submit activation is restricted to ChatGPT tabs."
+    };
+  }
+
+  const targetWindowId = tab.windowId;
+  const targetWindow = await chrome.windows.get(targetWindowId);
+  const previousActiveTabs = await chrome.tabs.query({ active: true, windowId: targetWindowId });
+  const previousActiveTabId = previousActiveTabs[0]?.id;
+  const targetWasFocused = targetWindow.focused;
+  const targetTabWasActive = tab.active;
+  let focusAcquired = false;
+  let tabActivated = false;
+  let restoreDetail = "restore=not-needed";
+
+  try {
+    if (!tab.active) {
+      await chrome.tabs.update(tabId, { active: true });
+      tabActivated = true;
+    }
+
+    if (!targetWindow.focused) {
+      await chrome.windows.update(targetWindowId, { focused: true });
+      focusAcquired = true;
+    }
+
+    // Give the OS/window manager and ChatGPT a short interval to observe the
+    // focus transition before invoking the exact MAIN-world click used in the
+    // previous experiment.
+    await sleep(150);
+    const response = await activateChatGptSubmitMainWorld(sender);
+    if (!response.ok) return response;
+
+    // Keep the focus pulse alive briefly so any synchronous/near-synchronous
+    // attachment-send transaction can begin before we relinquish the window.
+    await sleep(750);
+
+    return {
+      ok: true,
+      method: "focus-main-world-click",
+      detail: [
+        response.detail,
+        `windowId=${targetWindowId}`,
+        `targetWasFocused=${targetWasFocused}`,
+        `targetTabWasActive=${targetTabWasActive}`,
+        `focusAcquired=${focusAcquired}`,
+        `tabActivated=${tabActivated}`,
+        restoreDetail
+      ].join(", ")
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      code: "FOCUS_SUBMIT_ERROR",
+      message: error instanceof Error ? error.message : "Focus-assisted submit activation failed."
+    };
+  } finally {
+    if (focusAcquired) {
+      try {
+        // Chrome documents focused:false as bringing the next window in z-order
+        // forward. This is a best-effort restoration of the user's prior context;
+        // extensions cannot name or reactivate an arbitrary external application.
+        await chrome.windows.update(targetWindowId, { focused: false });
+        restoreDetail = "restore=window-defocused";
+      } catch {
+        restoreDetail = "restore=window-defocus-failed";
+      }
+    }
+
+    if (tabActivated && previousActiveTabId !== undefined && previousActiveTabId !== tabId) {
+      try {
+        await chrome.tabs.update(previousActiveTabId, { active: true });
+      } catch {
+        // Do not turn a successful send into a delivery error merely because the
+        // previous tab could not be restored after navigation/window changes.
+      }
+    }
   }
 }
 
@@ -515,6 +614,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
           return;
         case "ACTIVATE_CHATGPT_SUBMIT_MAIN_WORLD":
           sendResponse(await activateChatGptSubmitMainWorld(_sender));
+          return;
+        case "ACTIVATE_CHATGPT_SUBMIT_WITH_FOCUS":
+          sendResponse(await activateChatGptSubmitWithFocus(_sender));
           return;
         case "PREPARE_TOOL_CALL":
           sendResponse(
