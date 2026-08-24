@@ -2,6 +2,7 @@ import type { AuditLogEntry, ExtensionSettings, ToolRequest } from "../protocol/
 import { renderLogEntries } from "./log_panel";
 
 const OVERLAY_POSITION_KEY = "chatgpt-tool-shim-overlay-position-v1";
+const OVERLAY_MINIMIZED_KEY = "chatgpt-tool-shim-overlay-minimized-v1";
 
 type OverlayCallbacks = {
   onToggleEnabled: (enabled: boolean) => void;
@@ -66,12 +67,18 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
       50% { box-shadow: 0 12px 36px rgba(0,0,0,0.35), 0 0 0 5px rgba(255,184,77,0.22); }
     }
     .panel { position: fixed; right: 16px; bottom: 16px; width: 340px; z-index: 2147483647; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #f3f5f7; background: rgba(14, 19, 24, 0.95); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35); overflow: hidden; }
+    .panel.minimized { width: 245px; }
+    .panel.minimized .body, .panel.minimized .log { display: none !important; }
+    .panel.minimized:not(.awaiting-confirmation) .confirm { display: none !important; }
+    .panel.minimized.awaiting-confirmation { width: 300px; }
     .panel.awaiting-confirmation { border-color: rgba(255,184,77,0.95); animation: shim-confirm-pulse 1.2s ease-in-out infinite; }
     .header, .body, .confirm, .log { padding: 10px 12px; }
     .header { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.12); background: linear-gradient(135deg, #1a2a3a, #183126); cursor: move; user-select: none; touch-action: none; }
     .header.dragging { cursor: grabbing; }
+    .header-controls { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
     .attention-badge { display: none; padding: 2px 6px; border-radius: 999px; background: #ffb84d; color: #17120a; font-size: 10px; font-weight: 800; letter-spacing: 0.04em; }
     .panel.awaiting-confirmation .attention-badge { display: inline-block; }
+    .minimize-button { width: 28px; height: 24px; padding: 0; border-radius: 6px; background: #253241; color: #f3f5f7; font-size: 15px; line-height: 1; }
     .row { display: flex; justify-content: space-between; gap: 8px; margin: 6px 0; align-items: center; }
     .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     button { border: 0; border-radius: 8px; padding: 6px 10px; cursor: pointer; font: inherit; color: #0e1318; background: #d1f072; }
@@ -85,7 +92,13 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
   const panel = document.createElement("div");
   panel.className = "panel";
   panel.innerHTML = `
-    <div class="header" title="Drag to move Tool Shim"><span>Tool Shim · restart</span><span class="attention-badge">ACTION REQUIRED</span></div>
+    <div class="header" title="Drag to move Tool Shim">
+      <span>Tool Shim · restart</span>
+      <span class="header-controls">
+        <span class="attention-badge">ACTION REQUIRED</span>
+        <button id="minimize" class="minimize-button" type="button" aria-label="Minimize Tool Shim" title="Minimize Tool Shim">−</button>
+      </span>
+    </div>
     <div class="body">
       <div class="row"><span>Enabled</span><button id="enabled" class="secondary"></button></div>
       <div class="row"><span>Auto Run Safe</span><button id="autorun" class="secondary"></button></div>
@@ -117,6 +130,7 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
   shadow.append(style, panel);
 
   const header = panel.querySelector<HTMLElement>(".header")!;
+  const minimizeButton = panel.querySelector<HTMLButtonElement>("#minimize")!;
   const enabledButton = panel.querySelector<HTMLButtonElement>("#enabled")!;
   const autoRunButton = panel.querySelector<HTMLButtonElement>("#autorun")!;
   const autoSubmitButton = panel.querySelector<HTMLButtonElement>("#autosubmit")!;
@@ -168,6 +182,40 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
     }
   }
 
+  let minimized = false;
+
+  function syncMinimizedState(persist: boolean) {
+    panel.classList.toggle("minimized", minimized);
+    minimizeButton.textContent = minimized ? "+" : "−";
+    const label = minimized ? "Expand Tool Shim" : "Minimize Tool Shim";
+    minimizeButton.setAttribute("aria-label", label);
+    minimizeButton.title = label;
+
+    if (persist) {
+      try {
+        localStorage.setItem(OVERLAY_MINIMIZED_KEY, minimized ? "1" : "0");
+      } catch {
+        // Minimized-state persistence is a convenience only.
+      }
+    }
+
+    window.requestAnimationFrame(() => {
+      if (panel.style.left && panel.style.top) {
+        const rect = panel.getBoundingClientRect();
+        setPanelPosition(rect.left, rect.top, false);
+      }
+    });
+  }
+
+  function restoreMinimizedState() {
+    try {
+      minimized = localStorage.getItem(OVERLAY_MINIMIZED_KEY) === "1";
+    } catch {
+      minimized = false;
+    }
+    syncMinimizedState(false);
+  }
+
   let drag:
     | {
         pointerId: number;
@@ -178,6 +226,7 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
 
   header.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
+    if (event.target instanceof Element && event.target.closest("button")) return;
     const rect = panel.getBoundingClientRect();
     drag = {
       pointerId: event.pointerId,
@@ -208,6 +257,13 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
   header.addEventListener("pointerup", finishDrag);
   header.addEventListener("pointercancel", finishDrag);
 
+  minimizeButton.addEventListener("pointerdown", (event) => event.stopPropagation());
+  minimizeButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    minimized = !minimized;
+    syncMinimizedState(true);
+  });
+
   window.addEventListener("resize", () => {
     if (panel.style.left && panel.style.top) {
       const rect = panel.getBoundingClientRect();
@@ -215,6 +271,7 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
     }
   });
 
+  restoreMinimizedState();
   restorePanelPosition();
 
   panel.querySelector<HTMLButtonElement>("#configure-broker")!.addEventListener("click", callbacks.onConfigureBroker);
@@ -266,10 +323,22 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
       panel.classList.add("awaiting-confirmation");
       logBox.style.display = "none";
       this.setStatus({ state: "confirm", lastTool: request.name });
+      window.requestAnimationFrame(() => {
+        if (panel.style.left && panel.style.top) {
+          const rect = panel.getBoundingClientRect();
+          setPanelPosition(rect.left, rect.top, false);
+        }
+      });
     },
     clearConfirmation() {
       confirmBox.style.display = "none";
       panel.classList.remove("awaiting-confirmation");
+      window.requestAnimationFrame(() => {
+        if (panel.style.left && panel.style.top) {
+          const rect = panel.getBoundingClientRect();
+          setPanelPosition(rect.left, rect.top, false);
+        }
+      });
     },
     showLog(entries) {
       logText.textContent = renderLogEntries(entries);
