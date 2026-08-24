@@ -89,7 +89,7 @@ export function insertIntoComposer(text: string) {
 }
 
 export type SubmitMethod =
-  | "main-world-click"
+  | "focus-main-world-click"
   | "form-request-submit"
   | "mouse-events"
   | "keyboard-enter";
@@ -101,8 +101,8 @@ export type SubmitReceipt = {
   signal: "composer-cleared" | "user-message-added";
 };
 
-type MainWorldSubmitResponse =
-  | { ok: true; method: "main-world-click"; detail: string }
+type FocusSubmitResponse =
+  | { ok: true; method: "focus-main-world-click"; detail: string }
   | { ok: false; code: string; message: string };
 
 function countUserMessages(): number {
@@ -231,14 +231,16 @@ function composerHasAttachment(): boolean {
   );
 }
 
-async function activateMainWorldSubmit(): Promise<string> {
+async function activateFocusAssistedSubmit(): Promise<string> {
   const response = (await chrome.runtime.sendMessage({
-    type: "ACTIVATE_CHATGPT_SUBMIT_MAIN_WORLD"
-  })) as MainWorldSubmitResponse;
+    type: "ACTIVATE_CHATGPT_SUBMIT_WITH_FOCUS"
+  })) as FocusSubmitResponse;
 
   if (!response?.ok) {
     throw new Error(
-      response ? `${response.code}: ${response.message}` : "Main-world submit activation returned no response."
+      response
+        ? `${response.code}: ${response.message}`
+        : "Focus-assisted submit activation returned no response."
     );
   }
 
@@ -267,14 +269,15 @@ export async function submitComposer(
     run: () => void | string | Promise<void | string>;
   }> = [];
 
-  // The normal isolated-world activation ladder works for unfocused inline
-  // results, but live Edge testing shows attachment-bearing sends can ignore all
-  // three methods while unfocused even after upload readiness is verified. Try
-  // one narrow service-worker MAIN-world click first in exactly that state.
+  // Live Edge testing has already shown that isolated-world activation and a
+  // native MAIN-world button.click() are both ignored for a ready attachment
+  // while ChatGPT is unfocused. The next narrow experiment briefly focuses the
+  // ChatGPT window, invokes that same strict MAIN-world click, then relinquishes
+  // the window before falling back to the ordinary activation ladder.
   if (hasAttachment && !document.hasFocus()) {
     methods.push({
-      method: "main-world-click",
-      run: () => activateMainWorldSubmit()
+      method: "focus-main-world-click",
+      run: () => activateFocusAssistedSubmit()
     });
   }
 
