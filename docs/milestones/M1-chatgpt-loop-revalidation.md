@@ -34,6 +34,8 @@ A service-worker experiment then changed the result. The HUD's **Arm BG Probe 30
 
 That experiment has now been promoted into a persistent **Background Mode** scoped to the ChatGPT tab where it is enabled. The service worker periodically targets that tab by ID so the ordinary loop continues progressing while the user works elsewhere. A subsequent live `hello` acceptance run was explicitly confirmed by the user to have auto-submitted while Edge remained unfocused, with no manual interaction. Persistent visible-window background execution is therefore verified. Hidden-tab behavior remains a separate unresolved case and must not be inferred from the unfocused-window success.
 
+The first large-result acceptance run under persistent Background Mode partially succeeded. A 1.25 MiB broker result was generated, attached, and surfaced as a model-readable result artifact, but the final attachment-bearing Auto Submit failed. The shim selected the correct enabled Send control and invoked all three activation methods; none produced the existing composer-cleared/user-message-added acknowledgement within the configured 1,750 ms observation window. This failure is now characterized separately from safe inline background execution: background execution itself works, while attachment-bearing submission needs a stronger readiness/acknowledgement strategy.
+
 The canonical local iteration command is now the full extension+broker refresh sequence:
 
 ```powershell
@@ -58,6 +60,7 @@ This keeps browser and broker artifacts synchronized during the restart instead 
 - [x] Verify service-worker probe sees a newly rendered assistant `<tool_call>` before focus returns.
 - [x] Verify persistent Background Mode safe-tool detection + Auto Submit while ChatGPT is visible but Edge is window-unfocused.
 - [ ] Verify safe tool detection + Auto Submit while ChatGPT tab is hidden.
+- [x] Characterize attachment-bearing background Auto Submit failure while Edge is window-unfocused.
 - [ ] Verify attachment delivery while ChatGPT is visible but Edge is window-unfocused.
 - [ ] Verify attachment delivery while ChatGPT tab is hidden.
 - [ ] Streaming output does not trigger incomplete calls.
