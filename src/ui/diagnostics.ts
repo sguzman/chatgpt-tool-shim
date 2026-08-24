@@ -1,4 +1,8 @@
-import type { AuditLogEntry, ExtensionSettings } from "../protocol/types";
+import type {
+  AuditLogEntry,
+  BackgroundProbeSample,
+  ExtensionSettings
+} from "../protocol/types";
 import {
   collectSelectorCandidateDiagnostics,
   findAttachmentInput,
@@ -94,7 +98,8 @@ export function collectDomDiagnostics() {
 export function buildExtensionDiagnostics(
   settings: ExtensionSettings,
   auditLog: AuditLogEntry[],
-  trace: ToolTraceEvent[]
+  trace: ToolTraceEvent[],
+  backgroundProbe: BackgroundProbeSample[] = []
 ) {
   return {
     protocol: "chatgpt-tool-shim-extension-diagnostics/1",
@@ -102,7 +107,8 @@ export function buildExtensionDiagnostics(
     dom: collectDomDiagnostics(),
     settings: sanitizeSettings(settings),
     auditLog,
-    trace
+    trace,
+    backgroundProbe
   };
 }
 
