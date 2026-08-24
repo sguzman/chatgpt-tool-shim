@@ -20,7 +20,9 @@ That same run exposed a separate attachment-submission failure. The permission b
 
 The diagnostics also identified a concrete readiness bug rather than merely a background-mode problem: the 1.31 MB attachment was declared `ATTACHMENT_READY` only **70 ms** after attachment started. The readiness implementation counted three successful polls, but its wait helper intentionally wakes early on arbitrary DOM mutation to support background tabs. Three DOM wakeups could therefore occur in a few milliseconds and were not evidence that an upload had actually settled.
 
-The readiness implementation is now hardened. It measures continuous **wall-clock stability** instead of poll count, resets the stable interval whenever the filename disappears or an upload/processing indicator is visible, and inspects the filename chip's nearby DOM for busy state. The minimum stable window is 1.5 seconds for files up to 256 KiB, 3 seconds through 1 MiB, and 5 seconds above 1 MiB. Attachment-bearing Auto Submit also receives a minimum five-second submission-observation window per activation method instead of inheriting the 1.75-second plain-text acknowledgement window. This fix remains runtime-unverified until the next live attachment retry.
+The readiness implementation was then hardened. It measures continuous **wall-clock stability** instead of poll count, resets the stable interval whenever the filename disappears or an upload/processing indicator is visible, and inspects the filename chip's nearby DOM for busy state. The minimum stable window is 1.5 seconds for files up to 256 KiB, 3 seconds through 1 MiB, and 5 seconds above 1 MiB. Attachment-bearing Auto Submit also receives a minimum five-second submission-observation window per activation method instead of inheriting the 1.75-second plain-text acknowledgement window.
+
+The immediate live retry of the same 1,310,720-byte broker result succeeded. After the user approved the permission-gated call, they observed the attachment finish uploading, remain in the composer briefly while the hardened settle gate completed, and then the shim automatically submitted the attachment plus `<tool_result_ref>` roughly one to two seconds later without any manual Send action. The resulting conversation artifact is model-readable and reports the expected call ID and `requested_bytes: 1310720`. This verifies that the wall-clock readiness fix repaired the foreground >1 MiB Auto Submit regression. Unfocused attachment submission remains a separate acceptance test because the MCP permission boundary still requires the user to focus the window to approve execution.
 
 ## Checklist
 
@@ -41,7 +43,7 @@ The readiness implementation is now hardened. It measures continuous **wall-cloc
 - [x] Reuse call fingerprint dedupe to prevent duplicate delivery on repeated DOM mutations.
 - [x] Run JSON attachment test in the real page.
 - [x] Verify automatic submission of attachment + `<tool_result_ref>` with no manual Send action for the 65,536-byte foreground path.
-- [ ] Reverify attachment Auto Submit after wall-clock readiness hardening.
+- [x] Reverify attachment Auto Submit after wall-clock readiness hardening with a 1.25 MiB foreground result.
 - [ ] Test plain-text/source-file attachment.
 - [x] Test >1 MB result.
 - [ ] Verify attachment + `<tool_result_ref>` Auto Submit while Edge is unfocused after approval.
@@ -52,4 +54,4 @@ The readiness implementation is now hardened. It measures continuous **wall-cloc
 
 A large tool result travels from tool runtime to ChatGPT as an attachment and the model-visible reference is submitted automatically only after upload completion.
 
-**Exit condition verified in the live Edge session for the 65,536-byte JSON result path. The >1 MiB transport itself is also verified; the 1.25 MiB run exposed and motivated a readiness-gate fix that still requires live revalidation.**
+**Exit condition verified in the live Edge session for both the 65,536-byte JSON result path and the repaired 1.25 MiB foreground path. Unfocused attachment Auto Submit remains a separate acceptance test.**
