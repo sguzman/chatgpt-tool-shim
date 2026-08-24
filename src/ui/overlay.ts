@@ -9,6 +9,7 @@ type OverlayCallbacks = {
   onToggleAutoRun: (enabled: boolean) => void;
   onToggleAutoSubmit: (enabled: boolean) => void;
   onToggleAttachmentResults: (enabled: boolean) => void;
+  onToggleBackgroundMode: (enabled: boolean) => void;
   onConfigureBroker: () => void;
   onRequestLog: () => void;
   onDownloadDiagnostics: () => void;
@@ -45,6 +46,7 @@ type OverlayPosition = {
 
 export type OverlayController = {
   setSettings: (settings: ExtensionSettings) => void;
+  setBackgroundMode: (enabled: boolean) => void;
   setStatus: (status: Partial<OverlayStatus>) => void;
   showConfirmation: (request: ToolRequest, message: string) => void;
   clearConfirmation: () => void;
@@ -104,6 +106,7 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
       <div class="row"><span>Auto Run Safe</span><button id="autorun" class="secondary"></button></div>
       <div class="row"><span>Auto Submit</span><button id="autosubmit" class="secondary"></button></div>
       <div class="row"><span>Attach Large Results</span><button id="attachments" class="secondary"></button></div>
+      <div class="row"><span>Background Mode</span><button id="background-mode" class="secondary">OFF</button></div>
       <div class="row"><span>Broker</span><span id="broker-status" class="muted">off</span></div>
       <div class="row"><span>Status</span><span id="status-text" class="muted">idle</span></div>
       <div class="row"><span>Last Tool</span><span id="last-tool" class="muted">none</span></div>
@@ -135,6 +138,7 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
   const autoRunButton = panel.querySelector<HTMLButtonElement>("#autorun")!;
   const autoSubmitButton = panel.querySelector<HTMLButtonElement>("#autosubmit")!;
   const attachmentsButton = panel.querySelector<HTMLButtonElement>("#attachments")!;
+  const backgroundModeButton = panel.querySelector<HTMLButtonElement>("#background-mode")!;
   const brokerStatus = panel.querySelector<HTMLElement>("#broker-status")!;
   const statusText = panel.querySelector<HTMLElement>("#status-text")!;
   const lastTool = panel.querySelector<HTMLElement>("#last-tool")!;
@@ -287,6 +291,7 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
 
   let currentSettings: ExtensionSettings | null = null;
   let currentStatus: OverlayStatus = { state: "idle", lastTool: "none", lastError: "none" };
+  let backgroundModeEnabled = false;
 
   function syncButtons() {
     if (!currentSettings) return;
@@ -301,15 +306,29 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
         : "missing token";
   }
 
+  function syncBackgroundModeButton() {
+    backgroundModeButton.textContent = backgroundModeEnabled ? "ON" : "OFF";
+    backgroundModeButton.title = backgroundModeEnabled
+      ? "Keep this ChatGPT tab responsive while Edge is unfocused"
+      : "Enable background keepalive for this ChatGPT tab";
+  }
+
   enabledButton.addEventListener("click", () => currentSettings && callbacks.onToggleEnabled(!currentSettings.enabled));
   autoRunButton.addEventListener("click", () => currentSettings && callbacks.onToggleAutoRun(!currentSettings.autoRunSafeTools));
   autoSubmitButton.addEventListener("click", () => currentSettings && callbacks.onToggleAutoSubmit(!currentSettings.autoSubmitToolResults));
   attachmentsButton.addEventListener("click", () => currentSettings && callbacks.onToggleAttachmentResults(!currentSettings.attachmentResultsEnabled));
+  backgroundModeButton.addEventListener("click", () => callbacks.onToggleBackgroundMode(!backgroundModeEnabled));
+
+  syncBackgroundModeButton();
 
   return {
     setSettings(nextSettings) {
       currentSettings = nextSettings;
       syncButtons();
+    },
+    setBackgroundMode(enabled) {
+      backgroundModeEnabled = enabled;
+      syncBackgroundModeButton();
     },
     setStatus(status) {
       currentStatus = { ...currentStatus, ...status };
