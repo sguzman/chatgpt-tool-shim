@@ -14,6 +14,17 @@ function dispatchInput(element: HTMLElement | HTMLTextAreaElement) {
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+function composerText(element: HTMLElement | HTMLTextAreaElement | null): string {
+  if (!element) return "";
+  return element instanceof HTMLTextAreaElement
+    ? element.value.trim()
+    : (element.textContent?.trim() ?? "");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export function insertIntoComposer(text: string) {
   const composer = findComposer();
   if (!composer) {
@@ -55,32 +66,66 @@ export function insertIntoComposer(text: string) {
   dispatchInput(composer);
 }
 
-export function submitComposer(): boolean {
-  const composer = findComposer();
-  const button = findSubmitButton();
-  if (button && !button.disabled) {
-    button.click();
-    return true;
+export type SubmitReceipt = {
+  method: "button-click";
+  readyAfterMs: number;
+  clearedAfterMs: number;
+};
+
+async function waitForSubmitReady(timeoutMs: number): Promise<{
+  button: HTMLButtonElement;
+  readyAfterMs: number;
+}> {
+  const startedAt = performance.now();
+
+  while (performance.now() - startedAt < timeoutMs) {
+    const composer = findComposer();
+    const button = findSubmitButton();
+    if (composer && composerText(composer).length > 0 && button && !button.disabled) {
+      return {
+        button,
+        readyAfterMs: Math.round(performance.now() - startedAt)
+      };
+    }
+    await sleep(50);
   }
 
-  if (!composer) {
-    return false;
+  throw new Error(`ChatGPT submit control did not become ready within ${timeoutMs}ms.`);
+}
+
+async function waitForComposerCleared(timeoutMs: number): Promise<number> {
+  const startedAt = performance.now();
+
+  while (performance.now() - startedAt < timeoutMs) {
+    const current = findComposer();
+    if (current && composerText(current).length === 0) {
+      return Math.round(performance.now() - startedAt);
+    }
+    await sleep(50);
   }
 
-  composer.focus();
-  const keyOptions: KeyboardEventInit = {
-    bubbles: true,
-    cancelable: true,
-    key: "Enter",
-    code: "Enter",
-    keyCode: 13,
-    which: 13
+  throw new Error(
+    `ChatGPT send control was clicked, but the composer did not clear within ${timeoutMs}ms.`
+  );
+}
+
+export async function submitComposer(
+  options: { readyTimeoutMs?: number; clearTimeoutMs?: number } = {}
+): Promise<SubmitReceipt> {
+  const { button, readyAfterMs } = await waitForSubmitReady(options.readyTimeoutMs ?? 5_000);
+
+  // Manual clicking this same control is the known-good path. The previous
+  // implementation clicked immediately after insertion and could race ChatGPT's
+  // editor state. Wait until the control is actually enabled, click exactly once,
+  // and then verify that ChatGPT consumed the composer contents.
+  button.click();
+
+  const clearedAfterMs = await waitForComposerCleared(options.clearTimeoutMs ?? 5_000);
+  return {
+    method: "button-click",
+    readyAfterMs,
+    clearedAfterMs
   };
-
-  composer.dispatchEvent(new KeyboardEvent("keydown", keyOptions));
-  composer.dispatchEvent(new KeyboardEvent("keypress", keyOptions));
-  composer.dispatchEvent(new KeyboardEvent("keyup", keyOptions));
-  return true;
 }
 
 export type AttachmentReceipt = {
@@ -138,7 +183,7 @@ async function waitForAttachmentReady(filename: string, timeoutMs: number): Prom
       stablePolls = 0;
     }
 
-    await new Promise((resolve) => window.setTimeout(resolve, 250));
+    await sleep(250);
   }
 
   throw new Error(`Attachment ${filename} did not reach a stable ready state within ${timeoutMs}ms.`);
