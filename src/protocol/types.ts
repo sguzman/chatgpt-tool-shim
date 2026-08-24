@@ -123,5 +123,6 @@ export type RuntimeMessage =
   | { type: "RUN_BACKGROUND_PROBE"; durationMs?: number; intervalMs?: number }
   | { type: "GET_BACKGROUND_MODE_STATE" }
   | { type: "SET_BACKGROUND_MODE"; enabled: boolean }
+  | { type: "ACTIVATE_CHATGPT_SUBMIT_MAIN_WORLD" }
   | { type: "PREPARE_TOOL_CALL"; call: ParsedToolCall; source: ToolRequestSource }
   | { type: "EXECUTE_TOOL_CALL"; request: ToolRequest };
