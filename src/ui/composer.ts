@@ -210,6 +210,19 @@ function dispatchEnter(composer: HTMLElement | HTMLTextAreaElement) {
   composer.dispatchEvent(new KeyboardEvent("keyup", init));
 }
 
+function composerHasAttachment(): boolean {
+  const input = findAttachmentInput();
+  if (input?.files?.length) return true;
+
+  const scope = findComposerScope();
+  if (!scope) return false;
+  return Boolean(
+    scope.querySelector(
+      '[data-testid*="attachment"], [data-testid*="file"], [aria-label*="attachment" i], [aria-label*="file" i]'
+    )
+  );
+}
+
 export async function submitComposer(
   options: { readyTimeoutMs?: number; observeTimeoutMs?: number } = {}
 ): Promise<SubmitReceipt> {
@@ -217,7 +230,13 @@ export async function submitComposer(
     options.readyTimeoutMs ?? 5_000
   );
   const initialUserMessageCount = countUserMessages();
-  const observeTimeoutMs = options.observeTimeoutMs ?? 1_750;
+  // Attachment-bearing sends have a slower page-side acknowledgement path than
+  // ordinary text sends. Preserve the caller's timeout for text, but never use
+  // the short text timeout when a file is present.
+  const requestedObserveTimeoutMs = options.observeTimeoutMs ?? 1_750;
+  const observeTimeoutMs = composerHasAttachment()
+    ? Math.max(requestedObserveTimeoutMs, 5_000)
+    : requestedObserveTimeoutMs;
   const attempts: string[] = [];
 
   const methods: Array<{ method: SubmitMethod; run: () => void }> = [
@@ -276,11 +295,37 @@ type AttachmentReadiness = {
   busy: boolean;
 };
 
+function elementLooksBusy(element: HTMLElement): boolean {
+  const style = window.getComputedStyle(element);
+  if (style.display === "none" || style.visibility === "hidden") return false;
+
+  if (
+    element.getAttribute("aria-busy") === "true" ||
+    element.getAttribute("role") === "progressbar" ||
+    element.getAttribute("data-state") === "loading" ||
+    element.getAttribute("data-loading") === "true"
+  ) {
+    return true;
+  }
+
+  const descriptor = [
+    element.getAttribute("aria-label"),
+    element.getAttribute("title"),
+    element.getAttribute("data-state"),
+    element.getAttribute("data-testid"),
+    element.childElementCount <= 4 ? element.textContent : null
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return /\b(uploading|processing|attaching)\b/i.test(descriptor);
+}
+
 function inspectAttachmentReadiness(filename: string): AttachmentReadiness {
   const scope = findComposerScope() ?? document.body;
   const normalized = filename.toLowerCase();
 
-  const filenameVisible = Array.from(scope.querySelectorAll<HTMLElement>("*")).some((element) => {
+  const filenameMatches = Array.from(scope.querySelectorAll<HTMLElement>("*")).filter((element) => {
     const descriptor = [
       element.getAttribute("aria-label"),
       element.getAttribute("title"),
@@ -293,37 +338,66 @@ function inspectAttachmentReadiness(filename: string): AttachmentReadiness {
     return descriptor.includes(normalized);
   });
 
-  const busy = Array.from(
+  const filenameVisible = filenameMatches.length > 0;
+
+  const genericBusy = Array.from(
     scope.querySelectorAll<HTMLElement>(
       '[aria-busy="true"], [role="progressbar"], [data-state="loading"], [data-loading="true"]'
     )
-  ).some((element) => {
-    const style = window.getComputedStyle(element);
-    return style.display !== "none" && style.visibility !== "hidden";
+  ).some(elementLooksBusy);
+
+  const attachmentBusy = filenameMatches.some((match) => {
+    let current: HTMLElement | null = match;
+    for (let depth = 0; current && depth < 5; depth += 1) {
+      if (elementLooksBusy(current)) return true;
+      const nestedBusy = Array.from(current.querySelectorAll<HTMLElement>("*")).some(elementLooksBusy);
+      if (nestedBusy) return true;
+      current = current.parentElement;
+    }
+    return false;
   });
 
-  return { filenameVisible, busy };
+  return { filenameVisible, busy: genericBusy || attachmentBusy };
 }
 
-async function waitForAttachmentReady(filename: string, timeoutMs: number): Promise<number> {
+function minimumAttachmentStableMs(fileSize: number): number {
+  if (fileSize > 1024 * 1024) return 5_000;
+  if (fileSize > 256 * 1024) return 3_000;
+  return 1_500;
+}
+
+async function waitForAttachmentReady(
+  filename: string,
+  fileSize: number,
+  timeoutMs: number
+): Promise<number> {
   const startedAt = performance.now();
-  let stablePolls = 0;
+  const minimumStableMs = minimumAttachmentStableMs(fileSize);
+  let stableSince: number | null = null;
 
   while (performance.now() - startedAt < timeoutMs) {
+    const now = performance.now();
     const state = inspectAttachmentReadiness(filename);
     if (state.filenameVisible && !state.busy) {
-      stablePolls += 1;
-      if (stablePolls >= 3) {
-        return Math.round(performance.now() - startedAt);
+      stableSince ??= now;
+      // `sleep()` intentionally wakes on arbitrary DOM mutation so hidden tabs
+      // remain responsive. Therefore readiness must be measured in elapsed wall
+      // time, not a count of successful polls: three DOM mutations can occur in
+      // only a few milliseconds while a real upload is still in flight.
+      if (now - stableSince >= minimumStableMs) {
+        return Math.round(now - startedAt);
       }
     } else {
-      stablePolls = 0;
+      stableSince = null;
     }
 
     await sleep(250);
   }
 
-  throw new Error(`Attachment ${filename} did not reach a stable ready state within ${timeoutMs}ms.`);
+  throw new Error(
+    `Attachment ${filename} did not remain visibly ready and non-busy for ` +
+      `${minimumStableMs}ms within ${timeoutMs}ms.`
+  );
 }
 
 export async function attachFileToComposer(
@@ -341,7 +415,11 @@ export async function attachFileToComposer(
   input.dispatchEvent(new Event("input", { bubbles: true }));
   input.dispatchEvent(new Event("change", { bubbles: true }));
 
-  const readyAfterMs = await waitForAttachmentReady(file.name, options.timeoutMs ?? 30_000);
+  const readyAfterMs = await waitForAttachmentReady(
+    file.name,
+    file.size,
+    options.timeoutMs ?? 30_000
+  );
   return {
     filename: file.name,
     inputAccept: input.accept,
