@@ -22,7 +22,11 @@ The diagnostics also identified a concrete readiness bug rather than merely a ba
 
 The readiness implementation was then hardened. It measures continuous **wall-clock stability** instead of poll count, resets the stable interval whenever the filename disappears or an upload/processing indicator is visible, and inspects the filename chip's nearby DOM for busy state. The minimum stable window is 1.5 seconds for files up to 256 KiB, 3 seconds through 1 MiB, and 5 seconds above 1 MiB. Attachment-bearing Auto Submit also receives a minimum five-second submission-observation window per activation method instead of inheriting the 1.75-second plain-text acknowledgement window.
 
-The immediate live retry of the same 1,310,720-byte broker result succeeded. After the user approved the permission-gated call, they observed the attachment finish uploading, remain in the composer briefly while the hardened settle gate completed, and then the shim automatically submitted the attachment plus `<tool_result_ref>` roughly one to two seconds later without any manual Send action. The resulting conversation artifact is model-readable and reports the expected call ID and `requested_bytes: 1310720`. This verifies that the wall-clock readiness fix repaired the foreground >1 MiB Auto Submit regression. Unfocused attachment submission remains a separate acceptance test because the MCP permission boundary still requires the user to focus the window to approve execution.
+The immediate live retry of the same 1,310,720-byte broker result succeeded. After the user approved the permission-gated call, they observed the attachment finish uploading, remain in the composer briefly while the hardened settle gate completed, and then the shim automatically submitted the attachment plus `<tool_result_ref>` roughly one to two seconds later without any manual Send action. The resulting conversation artifact is model-readable and reports the expected call ID and `requested_bytes: 1310720`. This verifies that the wall-clock readiness fix repaired the foreground >1 MiB Auto Submit regression.
+
+A later retry isolated the remaining unfocused boundary after the deterministic Background Mode wakeup fix. The new call was detected and entered `WAITING_CONFIRMATION` while `focused=false`; the user focused Edge only to approve the required localhost permission, then immediately moved away. Dispatch and attachment creation began focused, but the hardened readiness gate completed after **5131 ms** with `focused=false`. `SUBMITTING` also began unfocused. The correct enabled `send-button` was present, yet `form.requestSubmit`, synthetic mouse activation, and Enter each produced no composer-clear or new-user-message signal within their full 5000 ms observation windows. The shim emitted `RESULT_DELIVERY_ERROR`, leaving the valid attachment and `<tool_result_ref>` in the composer until the user manually pressed Send. This cleanly separates the remaining problem from tool execution, background wakeup, upload transport, and readiness: the unresolved boundary is specifically **attachment-bearing Send activation while the ChatGPT window is unfocused**.
+
+A narrow implementation experiment now targets that boundary. When an attachment is present and `document.hasFocus()` is false, the content script first asks the extension service worker to execute a strict Send-button lookup in ChatGPT's `MAIN` world and invoke the real button's native `.click()` there. It does not add `chrome.debugger`, steal focus, bypass tool confirmation, or run on non-ChatGPT tabs. If the MAIN-world click does not produce a submission signal, the existing isolated-world `requestSubmit` / mouse / Enter ladder still runs and records the failure. This experiment is implementation-only until the next live Edge retry.
 
 ## Checklist
 
@@ -46,7 +50,9 @@ The immediate live retry of the same 1,310,720-byte broker result succeeded. Aft
 - [x] Reverify attachment Auto Submit after wall-clock readiness hardening with a 1.25 MiB foreground result.
 - [ ] Test plain-text/source-file attachment.
 - [x] Test >1 MB result.
-- [ ] Verify attachment + `<tool_result_ref>` Auto Submit while Edge is unfocused after approval.
+- [x] Characterize post-approval unfocused attachment Send failure after verified upload readiness.
+- [x] Implement a ChatGPT MAIN-world Send-button fallback for unfocused attachment delivery.
+- [ ] Reverify attachment + `<tool_result_ref>` Auto Submit while Edge is unfocused after approval using the MAIN-world fallback.
 - [ ] Test binary attachment.
 - [x] Add attachment-state events to extension diagnostics.
 
@@ -54,4 +60,4 @@ The immediate live retry of the same 1,310,720-byte broker result succeeded. Aft
 
 A large tool result travels from tool runtime to ChatGPT as an attachment and the model-visible reference is submitted automatically only after upload completion.
 
-**Exit condition verified in the live Edge session for both the 65,536-byte JSON result path and the repaired 1.25 MiB foreground path. Unfocused attachment Auto Submit remains a separate acceptance test.**
+**Exit condition verified in the live Edge session for both the 65,536-byte JSON result path and the repaired 1.25 MiB foreground path. The post-approval unfocused path now reaches verified attachment readiness but still fails final Send; the MAIN-world activation fallback awaits live revalidation.**
