@@ -77,11 +77,13 @@ npm run build
 
 Load `dist/` as an unpacked extension from `edge://extensions` or `chrome://extensions`.
 
-Start the broker in another terminal:
+For normal restart-branch iteration, use this single full refresh command from the repository root:
 
 ```powershell
-npm run server:start
+git pull --ff-only; npm test; npm run build; npm run server:start
 ```
+
+This intentionally refreshes and validates both the extension and broker together. `npm run server:start` remains attached to the terminal; stop it with `Ctrl+C` before running the refresh sequence again.
 
 If `CHATGPT_TOOL_SHIM_TOKEN` is not already set, the broker prints an ephemeral random token. In the ChatGPT overlay click **Configure Broker**, keep:
 
@@ -139,6 +141,7 @@ Broker-native MVP capabilities:
 
 - `broker.hello`
 - `broker.clock`
+- `broker.large_result`
 - `system.runtime`
 
 MCP registration, ontology search, and resource-scoped filesystem/application providers come after the basic round trip is verified locally.
