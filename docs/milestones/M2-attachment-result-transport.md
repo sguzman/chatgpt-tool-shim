@@ -10,7 +10,9 @@ The restart branch has an initial implementation for size-based routing, version
 
 A bounded `broker.large_result` capability provides a deterministic attachment-test payload without exposing filesystem resources. It defaults to 64 KiB, accepts an explicit integer byte count, and rejects requests above 2 MiB. Unit coverage verifies the default, explicit sizes, and rejection bounds.
 
-The first live Edge attachment run succeeded for a 65,536-byte broker payload. After the user approved the `local.mcp.call`, the extension routed the successful result to attachment transport, synthesized `tool-result--local.mcp.call--call_f05c7fd81b136353_2bcdaab7.json`, uploaded it through ChatGPT without a file-picker interaction, waited for the attachment readiness gate, and inserted the correlated `<tool_result_ref>`. The resulting conversation attachment is readable by the model and contains protocol `chat-shim-tool-result/v1`, the matching call ID, `broker.large_result`, and `requested_bytes: 65536`. Final automatic submission of the attachment/reference remains explicitly unverified until the user confirms they did not press Send for this run.
+The first live Edge attachment run succeeded for a 65,536-byte broker payload. The call intentionally paused at the `local.mcp.call` permission boundary; the user initially mistook that pause for a stall because the confirmation prompt was easy to miss. After the user approved the call, the extension routed the successful result to attachment transport, synthesized `tool-result--local.mcp.call--call_f05c7fd81b136353_2bcdaab7.json`, uploaded it through ChatGPT without a file-picker interaction, waited for the attachment readiness gate, inserted the correlated `<tool_result_ref>`, and automatically submitted the attachment/reference without any manual Send action. The resulting conversation attachment is readable by the model and contains protocol `chat-shim-tool-result/v1`, the matching call ID, `broker.large_result`, and `requested_bytes: 65536`.
+
+The permission pause itself is correct behavior; the usability follow-up is to make a pending confirmation visually harder to miss in the movable HUD.
 
 ## Checklist
 
@@ -29,7 +31,7 @@ The first live Edge attachment run succeeded for a 65,536-byte broker payload. A
 - [x] Handle upload failure with a compact error result.
 - [x] Reuse call fingerprint dedupe to prevent duplicate delivery on repeated DOM mutations.
 - [x] Run JSON attachment test in the real page.
-- [ ] Verify automatic submission of attachment + `<tool_result_ref>` with no manual Send action.
+- [x] Verify automatic submission of attachment + `<tool_result_ref>` with no manual Send action.
 - [ ] Test plain-text/source-file attachment.
 - [ ] Test >1 MB result.
 - [ ] Test binary attachment.
@@ -38,3 +40,5 @@ The first live Edge attachment run succeeded for a 65,536-byte broker payload. A
 ## Exit condition
 
 A large tool result travels from tool runtime to ChatGPT as an attachment and the model-visible reference is submitted automatically only after upload completion.
+
+**Exit condition verified in the live Edge session for the 65,536-byte JSON result path.**
