@@ -32,9 +32,11 @@ The first **visible-but-window-unfocused** test also failed without an extension
 
 A service-worker experiment then changed the result. The HUD's **Arm BG Probe 30s** repeatedly called `chrome.scripting.executeScript({ target: { tabId } })` against the originating ChatGPT tab. During the acceptance run, the probe successfully inspected the tab while `document.hasFocus()` was false and observed the newly rendered assistant `<tool_call>` before focus returned. More importantly, the ordinary content-script loop itself then completed `DETECTED`, `VALIDATED`, `DISPATCHED`, result packaging, `SUBMITTING`, and `SUBMITTED` while `visibility=visible; focused=false`.
 
-That experiment has now been promoted into a persistent **Background Mode** scoped to the ChatGPT tab where it is enabled. The service worker periodically targets that tab by ID so the ordinary loop continues progressing while the user works elsewhere. A subsequent live `hello` acceptance run was explicitly confirmed by the user to have auto-submitted while Edge remained unfocused, with no manual interaction. Persistent visible-window background execution is therefore verified. Hidden-tab behavior remains a separate unresolved case and must not be inferred from the unfocused-window success.
+That experiment was promoted into a persistent **Background Mode** scoped to the ChatGPT tab where it is enabled. An initial live `hello` acceptance run auto-submitted while Edge remained unfocused, but a later large-result run exposed that the implementation was still nondeterministic: the service worker repeatedly observed `latestAssistantHasToolCall: true` while unfocused, yet the content-script trace never recorded `DETECTED`. The earlier success had therefore depended on `executeScript` indirectly causing enough page activity for the MutationObserver to wake; the service worker was observing the tool call but was not explicitly asking the normal tool loop to scan.
 
-The first large-result acceptance run under persistent Background Mode partially succeeded. A 1.25 MiB broker result was generated, attached, and surfaced as a model-readable result artifact, but the final attachment-bearing Auto Submit failed. The shim selected the correct enabled Send control and invoked all three activation methods; none produced the existing composer-cleared/user-message-added acknowledgement within the configured 1,750 ms observation window. This failure is now characterized separately from safe inline background execution: background execution itself works, while attachment-bearing submission needs a stronger readiness/acknowledgement strategy.
+Background Mode has now been hardened into an explicit orchestration path. After each service-worker background inspection tick, the worker sends `BACKGROUND_SCAN_NOW` directly to the target ChatGPT tab's content script, and the content script schedules its serialized scan immediately. A live post-fix `hello` acceptance run returned `call_b08b504c4e2f386d_52f675cf`; the user explicitly confirmed that it submitted while Edge remained unfocused and that they did not press Send. The deterministic `service worker → BACKGROUND_SCAN_NOW → content-script scan → Auto Submit` path is therefore verified for a safe inline tool while the ChatGPT tab is visible and the Edge window is unfocused. Hidden-tab behavior remains a separate unresolved case.
+
+The first large-result acceptance run under persistent Background Mode partially succeeded. A 1.25 MiB broker result was generated, attached, and surfaced as a model-readable result artifact, but the final attachment-bearing Auto Submit failed. Diagnostics then revealed that the original readiness gate could falsely declare a 1.31 MB attachment ready after only 70 ms because its mutation-assisted wait counted rapid DOM wakeups as separate stable polls. That gate has since been hardened to require continuous wall-clock stability, and a foreground 1.25 MiB retry verified successful automatic attachment + `<tool_result_ref>` submission after the upload settled. The remaining attachment acceptance target is the same post-approval delivery path while Edge is unfocused, now on top of the explicit `BACKGROUND_SCAN_NOW` wakeup mechanism.
 
 The canonical local iteration command is now the full extension+broker refresh sequence:
 
@@ -58,10 +60,13 @@ This keeps browser and broker artifacts synchronized during the restart instead 
 - [x] Verify service-worker `executeScript(tabId)` can inspect ChatGPT while window-unfocused.
 - [ ] Verify service-worker `executeScript(tabId)` can inspect ChatGPT while tab-hidden.
 - [x] Verify service-worker probe sees a newly rendered assistant `<tool_call>` before focus returns.
-- [x] Verify persistent Background Mode safe-tool detection + Auto Submit while ChatGPT is visible but Edge is window-unfocused.
+- [x] Characterize nondeterministic observer-only wakeup under persistent Background Mode.
+- [x] Add explicit service-worker → content-script `BACKGROUND_SCAN_NOW` wakeup.
+- [x] Verify explicit Background Mode safe-tool detection + Auto Submit while ChatGPT is visible but Edge is window-unfocused.
 - [ ] Verify safe tool detection + Auto Submit while ChatGPT tab is hidden.
-- [x] Characterize attachment-bearing background Auto Submit failure while Edge is window-unfocused.
-- [ ] Verify attachment delivery while ChatGPT is visible but Edge is window-unfocused.
+- [x] Characterize attachment-bearing Auto Submit/readiness failure.
+- [x] Verify hardened >1 MiB attachment Auto Submit in the foreground.
+- [ ] Verify attachment delivery while ChatGPT is visible but Edge is window-unfocused after approval.
 - [ ] Verify attachment delivery while ChatGPT tab is hidden.
 - [ ] Streaming output does not trigger incomplete calls.
 - [ ] Fenced example calls remain ignored in a live page session.
