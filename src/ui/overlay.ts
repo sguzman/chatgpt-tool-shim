@@ -11,6 +11,7 @@ type OverlayCallbacks = {
   onConfigureBroker: () => void;
   onRequestLog: () => void;
   onDownloadDiagnostics: () => void;
+  onRunBackgroundProbe: () => void;
   onInsertPrompt: () => void;
   onInsertToolCatalog: () => void;
   onInsertHelloCall: () => void;
@@ -26,6 +27,7 @@ type OverlayState =
   | "packaging"
   | "attaching"
   | "submitting"
+  | "probing"
   | "confirm"
   | "error";
 
@@ -95,6 +97,7 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
       <div class="row"><span>Last Error</span><span id="last-error" class="muted">none</span></div>
       <div class="buttons">
         <button id="configure-broker" class="secondary">Configure Broker</button>
+        <button id="background-probe" class="secondary">Arm BG Probe 30s</button>
         <button id="insert-prompt" class="secondary">Insert Prompt</button>
         <button id="insert-tools" class="secondary">Insert Tools</button>
         <button id="insert-hello" class="secondary">Insert Hello</button>
@@ -215,6 +218,7 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
   restorePanelPosition();
 
   panel.querySelector<HTMLButtonElement>("#configure-broker")!.addEventListener("click", callbacks.onConfigureBroker);
+  panel.querySelector<HTMLButtonElement>("#background-probe")!.addEventListener("click", callbacks.onRunBackgroundProbe);
   panel.querySelector<HTMLButtonElement>("#show-log")!.addEventListener("click", callbacks.onRequestLog);
   panel.querySelector<HTMLButtonElement>("#diagnostics")!.addEventListener("click", callbacks.onDownloadDiagnostics);
   panel.querySelector<HTMLButtonElement>("#insert-prompt")!.addEventListener("click", callbacks.onInsertPrompt);
