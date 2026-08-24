@@ -3,6 +3,7 @@ import { parseLatestToolCall } from "./protocol/parse_tool_calls";
 import { buildPrimingPrompt, buildToolCatalogText } from "./protocol/tool_catalog";
 import type {
   AuditLogEntry,
+  BackgroundProbeSample,
   ExtensionSettings,
   PrepareToolResponse,
   RuntimeMessage,
@@ -29,6 +30,14 @@ type PendingConfirmation = {
 };
 
 type ExecutionResponse = ToolResult & { formatted: string };
+
+type BackgroundProbeResponse = {
+  ok: boolean;
+  tabId?: number;
+  samples?: number;
+  code?: string;
+  message?: string;
+};
 
 let settings: ExtensionSettings;
 let overlay: OverlayController;
@@ -330,10 +339,36 @@ async function openLog() {
   overlay.showLog(entries);
 }
 
+async function runBackgroundProbe() {
+  overlay.setStatus({ state: "probing", lastError: "none" });
+  try {
+    const response = await sendMessage<BackgroundProbeResponse>({
+      type: "RUN_BACKGROUND_PROBE",
+      durationMs: 30_000,
+      intervalMs: 1_000
+    });
+    if (!response.ok) {
+      throw new Error(response.message ?? response.code ?? "Background probe failed.");
+    }
+    overlay.setStatus({
+      state: "watching",
+      lastError: `Background probe completed (${response.samples ?? 0} samples).`
+    });
+  } catch (error) {
+    overlay.setStatus({
+      state: "error",
+      lastError: error instanceof Error ? error.message : "Background probe failed."
+    });
+  }
+}
+
 async function downloadDiagnostics() {
   try {
-    const entries = await sendMessage<AuditLogEntry[]>({ type: "GET_AUDIT_LOG" });
-    const diagnostics = buildExtensionDiagnostics(settings, entries, traceEvents);
+    const [entries, backgroundProbe] = await Promise.all([
+      sendMessage<AuditLogEntry[]>({ type: "GET_AUDIT_LOG" }),
+      sendMessage<BackgroundProbeSample[]>({ type: "GET_BACKGROUND_PROBE_SAMPLES" })
+    ]);
+    const diagnostics = buildExtensionDiagnostics(settings, entries, traceEvents, backgroundProbe);
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     downloadJsonFile(`extension-diagnostics-${timestamp}.json`, diagnostics);
     overlay.setStatus({ state: "watching", lastError: "none" });
@@ -362,6 +397,7 @@ async function init() {
     },
     onRequestLog: () => void openLog(),
     onDownloadDiagnostics: () => void downloadDiagnostics(),
+    onRunBackgroundProbe: () => void runBackgroundProbe(),
     onInsertPrompt: () => safeInsertPlainText(buildPrimingPrompt(), "Insert prompt failed"),
     onInsertToolCatalog: () => safeInsertPlainText(buildToolCatalogText(), "Insert tools failed"),
     onInsertHelloCall: () => safeInsertPlainText('<tool_call name="hello">\n{}\n</tool_call>', "Insert hello failed"),
