@@ -10,11 +10,9 @@ const COMPOSER_SELECTORS = [
 
 const SUBMIT_SELECTORS = [
   'button[data-testid="send-button"]',
-  'button[data-testid*="send"]',
   'button[aria-label="Send prompt"]',
   'button[aria-label="Send message"]',
-  'button[aria-label="Send"]',
-  'button[type="submit"]'
+  'button[aria-label="Send"]'
 ] as const;
 
 const ATTACHMENT_INPUT_SELECTORS = [
@@ -82,8 +80,8 @@ export function findComposerScope(): HTMLElement | null {
   return composer.parentElement;
 }
 
-function submitButtonScore(button: HTMLButtonElement): number {
-  const descriptor = [
+function buttonDescriptor(button: HTMLButtonElement): string {
+  return [
     button.getAttribute("aria-label"),
     button.getAttribute("data-testid"),
     button.getAttribute("title"),
@@ -92,16 +90,31 @@ function submitButtonScore(button: HTMLButtonElement): number {
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+}
 
-  if (/stop|cancel|voice|microphone|record|attach|upload/.test(descriptor)) {
+export function isLikelySendDescriptor(descriptor: string): boolean {
+  const normalized = descriptor.toLowerCase();
+  if (
+    /stop|cancel|voice|microphone|record|attach|upload|add files|add photos|apps?|tools?|mode|menu|plus/.test(
+      normalized
+    )
+  ) {
+    return false;
+  }
+
+  return /send-button|send prompt|send message|(^|\s)send($|\s)/.test(normalized);
+}
+
+function submitButtonScore(button: HTMLButtonElement): number {
+  const descriptor = buttonDescriptor(button);
+  if (!isLikelySendDescriptor(descriptor)) {
     return -100;
   }
 
   let score = 0;
+  if (descriptor.includes("send-button")) score += 120;
   if (/send prompt|send message/.test(descriptor)) score += 100;
-  else if (/\bsend\b/.test(descriptor)) score += 80;
-  if (/submit/.test(descriptor)) score += 50;
-  if (button.type === "submit") score += 30;
+  else if (/(^|\s)send($|\s)/.test(descriptor)) score += 80;
   if (button.closest("form")) score += 10;
   if (isVisibleElement(button)) score += 10;
   if (!button.disabled) score += 10;
@@ -112,9 +125,13 @@ export function findSubmitButton(): HTMLButtonElement | null {
   const scope = findComposerScope() ?? document;
 
   for (const selector of SUBMIT_SELECTORS) {
-    const button = queryCandidates<HTMLButtonElement>(scope, selector).find(
-      (candidate) => isVisibleElement(candidate) && !candidate.disabled
-    );
+    const button = queryCandidates<HTMLButtonElement>(scope, selector).find((candidate) => {
+      return (
+        isVisibleElement(candidate) &&
+        !candidate.disabled &&
+        isLikelySendDescriptor(buttonDescriptor(candidate))
+      );
+    });
     if (button) {
       return button;
     }
