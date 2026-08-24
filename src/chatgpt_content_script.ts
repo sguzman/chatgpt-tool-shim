@@ -110,14 +110,22 @@ function safeInsertPlainText(text: string, label: string) {
   }
 }
 
-async function insertErrorResult(request: ToolRequest, code: string, message: string) {
+async function insertErrorResult(
+  request: ToolRequest,
+  code: string,
+  message: string,
+  options: { autoSubmit?: boolean } = {}
+) {
   const text = formatToolResult({
     id: request.id,
     name: request.name,
     ok: false,
     error: { code, message }
   });
-  await insertInlineResult(request, text);
+  insertIntoComposer(text);
+  if (options.autoSubmit ?? true) {
+    await submitIfEnabled(request);
+  }
 }
 
 async function appendAuditEntry(
@@ -193,7 +201,7 @@ async function executeRequest(request: ToolRequest) {
     overlay.setStatus({ state: "error", lastTool: request.name, lastError: message });
 
     try {
-      await insertErrorResult(request, "RESULT_DELIVERY_ERROR", message);
+      await insertErrorResult(request, "RESULT_DELIVERY_ERROR", message, { autoSubmit: false });
     } catch {
       // Diagnostics remain available even if the composer is currently broken.
     }
