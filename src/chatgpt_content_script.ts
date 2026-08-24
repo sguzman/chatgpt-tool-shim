@@ -84,12 +84,13 @@ async function submitIfEnabled(request: Pick<ToolRequest, "id" | "name">) {
   overlay.setStatus({ state: "submitting", lastTool: request.name });
   recordTrace(request.id, request.name, "SUBMITTING");
 
-  const receipt = await submitComposer({ readyTimeoutMs: 5_000, clearTimeoutMs: 5_000 });
+  const receipt = await submitComposer({ readyTimeoutMs: 5_000, observeTimeoutMs: 1_750 });
   recordTrace(
     request.id,
     request.name,
     "SUBMITTED",
-    `${receipt.method}; ready after ${receipt.readyAfterMs}ms; composer cleared after ${receipt.clearedAfterMs}ms`
+    `${receipt.method}; ready after ${receipt.readyAfterMs}ms; ` +
+      `${receipt.signal} after ${receipt.observedAfterMs}ms`
   );
 }
 
