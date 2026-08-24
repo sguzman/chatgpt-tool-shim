@@ -28,7 +28,9 @@ A later retry isolated the remaining unfocused boundary after the deterministic 
 
 A narrow implementation experiment then targeted the extension-isolated-world hypothesis. When an attachment is present and `document.hasFocus()` is false, the content script asks the extension service worker to execute a strict Send-button lookup in ChatGPT's `MAIN` world and invoke the real button's native `.click()` there. It does not add `chrome.debugger`, steal focus, bypass tool confirmation, or run on non-ChatGPT tabs. If the MAIN-world click does not produce a submission signal, the existing isolated-world `requestSubmit` / mouse / Enter ladder still runs and records the failure.
 
-The live MAIN-world retry failed in the same narrow place. The service worker found the correct enabled ChatGPT Send control in the page MAIN world while `focused=false`, invoked its native `.click()`, and received no submission signal within 5000 ms. The isolated-world `requestSubmit`, synthetic mouse, and Enter fallbacks then also failed for 5000 ms each. The valid 1.25 MiB attachment and `<tool_result_ref>` again remained in the composer until manual Send. This rules out the extension isolated world as the primary cause and strongly points to a foreground/focus or trusted-user-activation requirement in the attachment-bearing send path. The next low-privilege diagnostic should temporarily focus the ChatGPT window, invoke Send, and restore the previously focused window; only if that still fails should a `chrome.debugger` trusted-input experiment be considered.
+The live MAIN-world retry failed in the same narrow place. The service worker found the correct enabled ChatGPT Send control in the page MAIN world while `focused=false`, invoked its native `.click()`, and received no submission signal within 5000 ms. The isolated-world `requestSubmit`, synthetic mouse, and Enter fallbacks then also failed for 5000 ms each. The valid 1.25 MiB attachment and `<tool_result_ref>` again remained in the composer until manual Send. This rules out the extension isolated world as the primary cause and strongly points to a foreground/focus or trusted-user-activation requirement in the attachment-bearing send path.
+
+The next low-privilege focus diagnostic is now implemented. For an attachment-bearing send that reaches the submit stage while ChatGPT is unfocused, the service worker briefly activates the originating ChatGPT tab if needed, focuses its Edge window, waits 150 ms for the focus transition, invokes the same strict MAIN-world native Send click, keeps the focus pulse for 750 ms, then sets that Edge window back to `focused:false` and restores the previously active tab when applicable. Chrome documents `focused:false` as bringing the next window in z-order forward, so restoration is best-effort; the extension cannot identify and explicitly reactivate an arbitrary external desktop application. No `chrome.debugger` permission is added, and the MCP confirmation boundary is unchanged. This focus-pulse path is implementation-only until the next live Edge retry.
 
 ## Checklist
 
@@ -55,7 +57,8 @@ The live MAIN-world retry failed in the same narrow place. The service worker fo
 - [x] Characterize post-approval unfocused attachment Send failure after verified upload readiness.
 - [x] Implement a ChatGPT MAIN-world Send-button fallback for unfocused attachment delivery.
 - [x] Reverify MAIN-world unfocused attachment Send and characterize the failure.
-- [ ] Test temporary focus-and-restore attachment Send as the next low-privilege diagnostic.
+- [x] Implement temporary focus-pulse + MAIN-world Send as the next low-privilege diagnostic.
+- [ ] Live verify temporary focus-pulse attachment Send and best-effort focus restoration.
 - [ ] Test binary attachment.
 - [x] Add attachment-state events to extension diagnostics.
 
@@ -63,4 +66,4 @@ The live MAIN-world retry failed in the same narrow place. The service worker fo
 
 A large tool result travels from tool runtime to ChatGPT as an attachment and the model-visible reference is submitted automatically only after upload completion.
 
-**Exit condition verified in the live Edge session for both the 65,536-byte JSON result path and the repaired 1.25 MiB foreground path. The post-approval unfocused path reaches verified attachment readiness but final Send fails from both the extension isolated world and ChatGPT MAIN world; the next diagnostic is temporary focus-and-restore before considering trusted-input mechanisms.**
+**Exit condition verified in the live Edge session for both the 65,536-byte JSON result path and the repaired 1.25 MiB foreground path. The post-approval unfocused path reaches verified attachment readiness but final Send fails from both the extension isolated world and ChatGPT MAIN world; the implemented focus-pulse diagnostic now awaits live verification before any `chrome.debugger` trusted-input experiment is considered.**
