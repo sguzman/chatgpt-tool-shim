@@ -28,7 +28,9 @@ Background-tab hardening is implemented for the core page loop. Tool-call scanni
 
 The first live **hidden-tab** acceptance test failed in an informative way. The user switched away from the ChatGPT tab and later returned to find the pending result submit immediately. Diagnostics showed that the entire call lifecycle — `DETECTED`, `VALIDATED`, `DISPATCHED`, result receipt/packaging, `SUBMITTING`, and `SUBMITTED` — began only after the page had returned to `visibility=visible; focused=true`. No hidden/unfocused trace event was emitted. This means timer throttling was not the remaining blocker: the current DOM-driven adapter did not receive/observe the assistant DOM update while the ChatGPT tab was hidden. Edge's "never sleep" exemption alone is therefore insufficient for a hidden background tab in this architecture.
 
-A separate **unfocused-but-visible** case remains worth testing: keep ChatGPT as the selected tab in its own non-minimized browser window, then focus another application or another Edge window. If Page Visibility remains `visible` while `document.hasFocus()` is false, the current DOM adapter may continue operating without requiring the ChatGPT window itself to have focus. A truly hidden-tab loop will require a different event source than the page DOM (for example a future browser/network adapter) rather than additional MutationObserver/timer tuning.
+The follow-up **visible-but-window-unfocused** test failed the same way. ChatGPT remained the selected tab in its own non-minimized Edge window while focus moved elsewhere. The user reported that the pending tool-result text was present when they returned, but Auto Submit only fired after the Edge window regained focus. Diagnostics again showed the complete lifecycle beginning only at `visibility=visible; focused=true`; no `focused=false` trace event was captured. This rules out the dedicated-visible-window workaround for the current content-script/DOM-observer architecture.
+
+Chrome's documented lifecycle model still considers a visible, unfocused page to be a passive page in which JavaScript may run, so these failures should not be generalized into a browser-wide rule that unfocused tabs can never execute extension/page code. Instead, this project's current event source is the problem boundary: the tool loop depends on ChatGPT's rendered DOM plus page-side execution. A truly unattended loop should therefore move the critical observation/execution path out of the content script and into an extension-level adapter that targets the tab directly (for example service-worker-driven `chrome.scripting.executeScript()` as a low-permission probe, or a stronger Chrome DevTools Protocol adapter if necessary).
 
 The canonical local iteration command is now the full extension+broker refresh sequence:
 
@@ -47,9 +49,10 @@ This keeps browser and broker artifacts synchronized during the restart instead 
 - [x] Overlay appears on `chatgpt.com`.
 - [x] Latest assistant message selector still works.
 - [x] Characterize hidden-tab failure with visibility/focus diagnostics.
-- [ ] Verify safe tool detection + Auto Submit while ChatGPT is visible but window-unfocused.
-- [ ] Verify safe tool detection + Auto Submit while ChatGPT tab is hidden/unfocused.
-- [ ] Verify attachment delivery while ChatGPT tab is hidden/unfocused.
+- [x] Characterize visible-but-window-unfocused failure with visibility/focus diagnostics.
+- [ ] Prototype extension-service-worker tab-targeted execution while ChatGPT window is unfocused.
+- [ ] Verify safe tool detection + Auto Submit while ChatGPT tab is hidden/unfocused using a non-content-script adapter.
+- [ ] Verify attachment delivery while ChatGPT tab is hidden/unfocused using a non-content-script adapter.
 - [ ] Streaming output does not trigger incomplete calls.
 - [ ] Fenced example calls remain ignored in a live page session.
 - [ ] Fingerprint dedupe prevents duplicate execution under stressed DOM mutations.
