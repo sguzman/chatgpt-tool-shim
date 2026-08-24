@@ -59,22 +59,31 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
   const style = document.createElement("style");
   style.textContent = `
     :host { all: initial; }
+    @keyframes shim-confirm-pulse {
+      0%, 100% { box-shadow: 0 12px 36px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,184,77,0.35); }
+      50% { box-shadow: 0 12px 36px rgba(0,0,0,0.35), 0 0 0 5px rgba(255,184,77,0.22); }
+    }
     .panel { position: fixed; right: 16px; bottom: 16px; width: 340px; z-index: 2147483647; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #f3f5f7; background: rgba(14, 19, 24, 0.95); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35); overflow: hidden; }
+    .panel.awaiting-confirmation { border-color: rgba(255,184,77,0.95); animation: shim-confirm-pulse 1.2s ease-in-out infinite; }
     .header, .body, .confirm, .log { padding: 10px 12px; }
-    .header { font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.12); background: linear-gradient(135deg, #1a2a3a, #183126); cursor: move; user-select: none; touch-action: none; }
+    .header { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.12); background: linear-gradient(135deg, #1a2a3a, #183126); cursor: move; user-select: none; touch-action: none; }
     .header.dragging { cursor: grabbing; }
+    .attention-badge { display: none; padding: 2px 6px; border-radius: 999px; background: #ffb84d; color: #17120a; font-size: 10px; font-weight: 800; letter-spacing: 0.04em; }
+    .panel.awaiting-confirmation .attention-badge { display: inline-block; }
     .row { display: flex; justify-content: space-between; gap: 8px; margin: 6px 0; align-items: center; }
     .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     button { border: 0; border-radius: 8px; padding: 6px 10px; cursor: pointer; font: inherit; color: #0e1318; background: #d1f072; }
     button.secondary { background: #253241; color: #f3f5f7; }
     pre { margin: 0; white-space: pre-wrap; max-height: 220px; overflow: auto; }
     .muted { color: #9fb0bf; max-width: 210px; overflow-wrap: anywhere; text-align: right; }
+    .confirm { border-top: 1px solid rgba(255,184,77,0.45); background: rgba(87,58,12,0.36); }
+    .confirm-title { margin-bottom: 6px; color: #ffd18a; font-weight: 800; letter-spacing: 0.04em; }
   `;
 
   const panel = document.createElement("div");
   panel.className = "panel";
   panel.innerHTML = `
-    <div class="header" title="Drag to move Tool Shim">Tool Shim · restart</div>
+    <div class="header" title="Drag to move Tool Shim"><span>Tool Shim · restart</span><span class="attention-badge">ACTION REQUIRED</span></div>
     <div class="body">
       <div class="row"><span>Enabled</span><button id="enabled" class="secondary"></button></div>
       <div class="row"><span>Auto Run Safe</span><button id="autorun" class="secondary"></button></div>
@@ -95,6 +104,7 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
       </div>
     </div>
     <div id="confirm" class="confirm" style="display:none">
+      <div class="confirm-title">Permission required</div>
       <div id="confirm-text"></div>
       <div class="buttons"><button id="confirm-run">Run</button><button id="confirm-cancel" class="secondary">Cancel</button></div>
     </div>
@@ -249,10 +259,14 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
     showConfirmation(request, message) {
       confirmText.textContent = `${message} [${request.name}]`;
       confirmBox.style.display = "block";
+      panel.classList.add("awaiting-confirmation");
       logBox.style.display = "none";
       this.setStatus({ state: "confirm", lastTool: request.name });
     },
-    clearConfirmation() { confirmBox.style.display = "none"; },
+    clearConfirmation() {
+      confirmBox.style.display = "none";
+      panel.classList.remove("awaiting-confirmation");
+    },
     showLog(entries) {
       logText.textContent = renderLogEntries(entries);
       logBox.style.display = logBox.style.display === "none" ? "block" : "none";
