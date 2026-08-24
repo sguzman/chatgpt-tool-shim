@@ -35,10 +35,23 @@ let overlay: OverlayController;
 let pendingConfirmation: PendingConfirmation | null = null;
 const seenFingerprints = new Set<string>();
 const traceEvents: ToolTraceEvent[] = [];
-let scanTimer: number | null = null;
+let scanQueued = false;
+let scanRunning = false;
+let rescanRequested = false;
+
+function pageExecutionState(): string {
+  return `visibility=${document.visibilityState}; focused=${document.hasFocus()}`;
+}
 
 function recordTrace(callId: string, toolName: string, state: string, detail?: string) {
-  traceEvents.push({ timestamp: new Date().toISOString(), callId, toolName, state, detail });
+  const executionState = pageExecutionState();
+  traceEvents.push({
+    timestamp: new Date().toISOString(),
+    callId,
+    toolName,
+    state,
+    detail: detail ? `${detail}; ${executionState}` : executionState
+  });
   if (traceEvents.length > 300) {
     traceEvents.splice(0, traceEvents.length - 300);
   }
@@ -274,9 +287,36 @@ async function processLatestAssistantMessage() {
   overlay.showConfirmation(preparation.request, pendingConfirmation.message);
 }
 
+async function runScheduledScan() {
+  scanQueued = false;
+  if (scanRunning) {
+    rescanRequested = true;
+    return;
+  }
+
+  scanRunning = true;
+  try {
+    await processLatestAssistantMessage();
+  } finally {
+    scanRunning = false;
+    if (rescanRequested) {
+      rescanRequested = false;
+      scheduleScan();
+    }
+  }
+}
+
 function scheduleScan() {
-  if (scanTimer !== null) window.clearTimeout(scanTimer);
-  scanTimer = window.setTimeout(() => void processLatestAssistantMessage(), 500);
+  if (scanRunning) {
+    rescanRequested = true;
+    return;
+  }
+  if (scanQueued) return;
+
+  scanQueued = true;
+  // MutationObserver already tells us the page changed. Queue a microtask instead
+  // of a timer so hidden/unfocused tabs do not depend on Chromium timer budgets.
+  queueMicrotask(() => void runScheduledScan());
 }
 
 function mountObserver() {
