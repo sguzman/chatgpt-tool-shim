@@ -1,6 +1,13 @@
 import type { ParsedToolCall } from "./types";
 
 const TOOL_CALL_REGEX = /<tool_call\b([^>]*)>([\s\S]*?)<\/tool_call>/g;
+const CALL_SESSION_NONCE = createSessionNonce();
+
+function createSessionNonce(): string {
+  const bytes = new Uint32Array(2);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(8, "0")).join("");
+}
 
 export function stripFencedCodeBlocks(text: string): string {
   return text.replace(/```[\s\S]*?```/g, "");
@@ -55,12 +62,14 @@ export function parseLatestToolCall(text: string): ParsedToolCall | null {
     return null;
   }
 
-  const id = attributes.id?.trim() || hashString(`${name}:${body}`);
+  const contentFingerprint = hashString(`${name}:${JSON.stringify(args)}`);
+  const id = attributes.id?.trim() || `call_${CALL_SESSION_NONCE}_${contentFingerprint.slice(5)}`;
+
   return {
     id,
     name,
     args,
     raw: fullMatch,
-    fingerprint: hashString(`${id}:${name}:${JSON.stringify(args)}`)
+    fingerprint: hashString(`${attributes.id?.trim() ?? "auto"}:${name}:${JSON.stringify(args)}`)
   };
 }
