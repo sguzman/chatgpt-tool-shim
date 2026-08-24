@@ -66,14 +66,35 @@ export function insertIntoComposer(text: string) {
   dispatchInput(composer);
 }
 
+export type SubmitMethod = "form-request-submit" | "mouse-events" | "keyboard-enter";
+
 export type SubmitReceipt = {
-  method: "button-click";
+  method: SubmitMethod;
   readyAfterMs: number;
-  clearedAfterMs: number;
+  observedAfterMs: number;
+  signal: "composer-cleared" | "user-message-added";
 };
+
+function countUserMessages(): number {
+  return document.querySelectorAll('[data-message-author-role="user"]').length;
+}
+
+function describeSubmitButton(button: HTMLButtonElement): string {
+  const parts = [
+    `tag=${button.tagName.toLowerCase()}`,
+    `type=${button.type || "none"}`,
+    `disabled=${button.disabled}`,
+    `data-testid=${button.getAttribute("data-testid") ?? "none"}`,
+    `aria-label=${button.getAttribute("aria-label") ?? "none"}`,
+    `title=${button.getAttribute("title") ?? "none"}`,
+    `form=${button.form ? "yes" : "no"}`
+  ];
+  return parts.join(", ");
+}
 
 async function waitForSubmitReady(timeoutMs: number): Promise<{
   button: HTMLButtonElement;
+  composer: HTMLElement | HTMLTextAreaElement;
   readyAfterMs: number;
 }> {
   const startedAt = performance.now();
@@ -84,6 +105,7 @@ async function waitForSubmitReady(timeoutMs: number): Promise<{
     if (composer && composerText(composer).length > 0 && button && !button.disabled) {
       return {
         button,
+        composer,
         readyAfterMs: Math.round(performance.now() - startedAt)
       };
     }
@@ -93,39 +115,132 @@ async function waitForSubmitReady(timeoutMs: number): Promise<{
   throw new Error(`ChatGPT submit control did not become ready within ${timeoutMs}ms.`);
 }
 
-async function waitForComposerCleared(timeoutMs: number): Promise<number> {
+async function waitForSubmissionObserved(
+  initialUserMessageCount: number,
+  timeoutMs: number
+): Promise<{ observedAfterMs: number; signal: SubmitReceipt["signal"] } | null> {
   const startedAt = performance.now();
 
   while (performance.now() - startedAt < timeoutMs) {
     const current = findComposer();
     if (current && composerText(current).length === 0) {
-      return Math.round(performance.now() - startedAt);
+      return {
+        observedAfterMs: Math.round(performance.now() - startedAt),
+        signal: "composer-cleared"
+      };
     }
+
+    if (countUserMessages() > initialUserMessageCount) {
+      return {
+        observedAfterMs: Math.round(performance.now() - startedAt),
+        signal: "user-message-added"
+      };
+    }
+
     await sleep(50);
   }
 
-  throw new Error(
-    `ChatGPT send control was clicked, but the composer did not clear within ${timeoutMs}ms.`
-  );
+  return null;
+}
+
+function requestFormSubmit(button: HTMLButtonElement, composer: HTMLElement | HTMLTextAreaElement) {
+  const form = button.form ?? composer.closest("form");
+  if (!(form instanceof HTMLFormElement)) {
+    throw new Error("Selected ChatGPT send control is not associated with a form.");
+  }
+
+  if (button.form === form && button.type === "submit") {
+    form.requestSubmit(button);
+  } else {
+    form.requestSubmit();
+  }
+}
+
+function dispatchMouseActivation(button: HTMLButtonElement) {
+  const init: MouseEventInit = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    button: 0,
+    buttons: 1,
+    view: window
+  };
+
+  button.dispatchEvent(new MouseEvent("mousedown", init));
+  button.dispatchEvent(new MouseEvent("mouseup", { ...init, buttons: 0 }));
+  button.dispatchEvent(new MouseEvent("click", { ...init, buttons: 0 }));
+}
+
+function dispatchEnter(composer: HTMLElement | HTMLTextAreaElement) {
+  composer.focus();
+  const init: KeyboardEventInit = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    key: "Enter",
+    code: "Enter",
+    keyCode: 13,
+    which: 13
+  };
+
+  composer.dispatchEvent(new KeyboardEvent("keydown", init));
+  composer.dispatchEvent(new KeyboardEvent("keypress", init));
+  composer.dispatchEvent(new KeyboardEvent("keyup", init));
 }
 
 export async function submitComposer(
-  options: { readyTimeoutMs?: number; clearTimeoutMs?: number } = {}
+  options: { readyTimeoutMs?: number; observeTimeoutMs?: number } = {}
 ): Promise<SubmitReceipt> {
-  const { button, readyAfterMs } = await waitForSubmitReady(options.readyTimeoutMs ?? 5_000);
+  const { button, composer, readyAfterMs } = await waitForSubmitReady(
+    options.readyTimeoutMs ?? 5_000
+  );
+  const initialUserMessageCount = countUserMessages();
+  const observeTimeoutMs = options.observeTimeoutMs ?? 1_750;
+  const attempts: string[] = [];
 
-  // Manual clicking this same control is the known-good path. The previous
-  // implementation clicked immediately after insertion and could race ChatGPT's
-  // editor state. Wait until the control is actually enabled, click exactly once,
-  // and then verify that ChatGPT consumed the composer contents.
-  button.click();
+  const methods: Array<{ method: SubmitMethod; run: () => void }> = [
+    {
+      method: "form-request-submit",
+      run: () => requestFormSubmit(button, composer)
+    },
+    {
+      method: "mouse-events",
+      run: () => dispatchMouseActivation(button)
+    },
+    {
+      method: "keyboard-enter",
+      run: () => dispatchEnter(findComposer() ?? composer)
+    }
+  ];
 
-  const clearedAfterMs = await waitForComposerCleared(options.clearTimeoutMs ?? 5_000);
-  return {
-    method: "button-click",
-    readyAfterMs,
-    clearedAfterMs
-  };
+  for (const attempt of methods) {
+    try {
+      attempt.run();
+      attempts.push(`${attempt.method}: invoked`);
+    } catch (error) {
+      attempts.push(
+        `${attempt.method}: ${error instanceof Error ? error.message : "activation failed"}`
+      );
+      continue;
+    }
+
+    const observed = await waitForSubmissionObserved(initialUserMessageCount, observeTimeoutMs);
+    if (observed) {
+      return {
+        method: attempt.method,
+        readyAfterMs,
+        observedAfterMs: observed.observedAfterMs,
+        signal: observed.signal
+      };
+    }
+
+    attempts.push(`${attempt.method}: no submission signal within ${observeTimeoutMs}ms`);
+  }
+
+  throw new Error(
+    `ChatGPT auto-submit failed after all activation methods. ` +
+      `Selected control: ${describeSubmitButton(button)}. Attempts: ${attempts.join(" | ")}`
+  );
 }
 
 export type AttachmentReceipt = {
