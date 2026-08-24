@@ -1,6 +1,8 @@
 import type { AuditLogEntry, ExtensionSettings, ToolRequest } from "../protocol/types";
 import { renderLogEntries } from "./log_panel";
 
+const OVERLAY_POSITION_KEY = "chatgpt-tool-shim-overlay-position-v1";
+
 type OverlayCallbacks = {
   onToggleEnabled: (enabled: boolean) => void;
   onToggleAutoRun: (enabled: boolean) => void;
@@ -33,6 +35,11 @@ type OverlayStatus = {
   lastError: string;
 };
 
+type OverlayPosition = {
+  left: number;
+  top: number;
+};
+
 export type OverlayController = {
   setSettings: (settings: ExtensionSettings) => void;
   setStatus: (status: Partial<OverlayStatus>) => void;
@@ -54,7 +61,8 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
     :host { all: initial; }
     .panel { position: fixed; right: 16px; bottom: 16px; width: 340px; z-index: 2147483647; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #f3f5f7; background: rgba(14, 19, 24, 0.95); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.35); overflow: hidden; }
     .header, .body, .confirm, .log { padding: 10px 12px; }
-    .header { font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.12); background: linear-gradient(135deg, #1a2a3a, #183126); }
+    .header { font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.12); background: linear-gradient(135deg, #1a2a3a, #183126); cursor: move; user-select: none; touch-action: none; }
+    .header.dragging { cursor: grabbing; }
     .row { display: flex; justify-content: space-between; gap: 8px; margin: 6px 0; align-items: center; }
     .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     button { border: 0; border-radius: 8px; padding: 6px 10px; cursor: pointer; font: inherit; color: #0e1318; background: #d1f072; }
@@ -66,7 +74,7 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
   const panel = document.createElement("div");
   panel.className = "panel";
   panel.innerHTML = `
-    <div class="header">Tool Shim · restart</div>
+    <div class="header" title="Drag to move Tool Shim">Tool Shim · restart</div>
     <div class="body">
       <div class="row"><span>Enabled</span><button id="enabled" class="secondary"></button></div>
       <div class="row"><span>Auto Run Safe</span><button id="autorun" class="secondary"></button></div>
@@ -95,6 +103,7 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
 
   shadow.append(style, panel);
 
+  const header = panel.querySelector<HTMLElement>(".header")!;
   const enabledButton = panel.querySelector<HTMLButtonElement>("#enabled")!;
   const autoRunButton = panel.querySelector<HTMLButtonElement>("#autorun")!;
   const autoSubmitButton = panel.querySelector<HTMLButtonElement>("#autosubmit")!;
@@ -107,6 +116,93 @@ export function createOverlay(callbacks: OverlayCallbacks): OverlayController {
   const confirmText = panel.querySelector<HTMLElement>("#confirm-text")!;
   const logBox = panel.querySelector<HTMLElement>("#log")!;
   const logText = panel.querySelector<HTMLElement>("#log-text")!;
+
+  function clampPosition(left: number, top: number): OverlayPosition {
+    const rect = panel.getBoundingClientRect();
+    const margin = 8;
+    return {
+      left: Math.max(margin, Math.min(left, window.innerWidth - rect.width - margin)),
+      top: Math.max(margin, Math.min(top, window.innerHeight - rect.height - margin))
+    };
+  }
+
+  function setPanelPosition(left: number, top: number, persist: boolean) {
+    const next = clampPosition(left, top);
+    panel.style.left = `${Math.round(next.left)}px`;
+    panel.style.top = `${Math.round(next.top)}px`;
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
+
+    if (persist) {
+      try {
+        localStorage.setItem(OVERLAY_POSITION_KEY, JSON.stringify(next));
+      } catch {
+        // Position persistence is a convenience only; dragging still works without storage.
+      }
+    }
+  }
+
+  function restorePanelPosition() {
+    try {
+      const raw = localStorage.getItem(OVERLAY_POSITION_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<OverlayPosition>;
+      if (typeof parsed.left === "number" && typeof parsed.top === "number") {
+        window.requestAnimationFrame(() => setPanelPosition(parsed.left!, parsed.top!, false));
+      }
+    } catch {
+      // Ignore corrupt or unavailable persisted position data.
+    }
+  }
+
+  let drag:
+    | {
+        pointerId: number;
+        offsetX: number;
+        offsetY: number;
+      }
+    | null = null;
+
+  header.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const rect = panel.getBoundingClientRect();
+    drag = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top
+    };
+    header.classList.add("dragging");
+    header.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+
+  header.addEventListener("pointermove", (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setPanelPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY, false);
+  });
+
+  const finishDrag = (event: PointerEvent) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const rect = panel.getBoundingClientRect();
+    setPanelPosition(rect.left, rect.top, true);
+    drag = null;
+    header.classList.remove("dragging");
+    if (header.hasPointerCapture(event.pointerId)) {
+      header.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  header.addEventListener("pointerup", finishDrag);
+  header.addEventListener("pointercancel", finishDrag);
+
+  window.addEventListener("resize", () => {
+    if (panel.style.left && panel.style.top) {
+      const rect = panel.getBoundingClientRect();
+      setPanelPosition(rect.left, rect.top, false);
+    }
+  });
+
+  restorePanelPosition();
 
   panel.querySelector<HTMLButtonElement>("#configure-broker")!.addEventListener("click", callbacks.onConfigureBroker);
   panel.querySelector<HTMLButtonElement>("#show-log")!.addEventListener("click", callbacks.onRequestLog);
