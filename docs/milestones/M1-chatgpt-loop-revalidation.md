@@ -30,7 +30,11 @@ The first live **hidden-tab** acceptance test failed in an informative way. The 
 
 The follow-up **visible-but-window-unfocused** test failed the same way. ChatGPT remained the selected tab in its own non-minimized Edge window while focus moved elsewhere. The user reported that the pending tool-result text was present when they returned, but Auto Submit only fired after the Edge window regained focus. Diagnostics again showed the complete lifecycle beginning only at `visibility=visible; focused=true`; no `focused=false` trace event was captured. This rules out the dedicated-visible-window workaround for the current content-script/DOM-observer architecture.
 
-Chrome's documented lifecycle model still considers a visible, unfocused page to be a passive page in which JavaScript may run, so these failures should not be generalized into a browser-wide rule that unfocused tabs can never execute extension/page code. Instead, this project's current event source is the problem boundary: the tool loop depends on ChatGPT's rendered DOM plus page-side execution. A truly unattended loop should therefore move the critical observation/execution path out of the content script and into an extension-level adapter that targets the tab directly (for example service-worker-driven `chrome.scripting.executeScript()` as a low-permission probe, or a stronger Chrome DevTools Protocol adapter if necessary).
+Chrome's documented lifecycle model still considers a visible, unfocused page to be a passive page in which JavaScript may run, so these failures should not be generalized into a browser-wide rule that unfocused tabs can never execute extension/page code. Instead, this project's current event source is the problem boundary: the tool loop depends on ChatGPT's rendered DOM plus page-side execution. A truly unattended loop should therefore move the critical observation/execution path out of the content script and into an extension-level adapter that targets the tab directly.
+
+A first extension-level experiment is now implemented. The HUD exposes **Arm BG Probe 30s**. When armed from the ChatGPT page, the extension service worker keeps the runtime message alive and repeatedly calls `chrome.scripting.executeScript({ target: { tabId } })` against the originating ChatGPT tab for thirty seconds. Each sample stores only structural/privacy-safe facts: timestamp, success/error, page visibility, focus state, ready state, assistant/user message counts, latest-assistant text length, and whether the latest assistant message structurally contains a `<tool_call>` marker. No page text is persisted. Samples are written incrementally to extension storage and included in **Download Diagnostics** under `backgroundProbe`.
+
+This probe is deliberately narrower than a background tool-loop rewrite. Its next acceptance test asks one decisive question: can the extension service worker inspect the ChatGPT DOM by explicit tab ID while the browser window is unfocused or the tab is hidden, and can it observe a newly rendered assistant `<tool_call>` before focus returns? If yes, orchestration can move into a service-worker/tab-targeted adapter. If no, the next escalation is a stronger browser adapter such as Chrome DevTools Protocol rather than further content-script tuning.
 
 The canonical local iteration command is now the full extension+broker refresh sequence:
 
@@ -50,7 +54,10 @@ This keeps browser and broker artifacts synchronized during the restart instead 
 - [x] Latest assistant message selector still works.
 - [x] Characterize hidden-tab failure with visibility/focus diagnostics.
 - [x] Characterize visible-but-window-unfocused failure with visibility/focus diagnostics.
-- [ ] Prototype extension-service-worker tab-targeted execution while ChatGPT window is unfocused.
+- [x] Prototype extension-service-worker tab-targeted execution probe.
+- [ ] Verify service-worker `executeScript(tabId)` can inspect ChatGPT while window-unfocused.
+- [ ] Verify service-worker `executeScript(tabId)` can inspect ChatGPT while tab-hidden.
+- [ ] Verify service-worker probe sees a newly rendered assistant `<tool_call>` before focus returns.
 - [ ] Verify safe tool detection + Auto Submit while ChatGPT tab is hidden/unfocused using a non-content-script adapter.
 - [ ] Verify attachment delivery while ChatGPT tab is hidden/unfocused using a non-content-script adapter.
 - [ ] Streaming output does not trigger incomplete calls.
