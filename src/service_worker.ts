@@ -1,6 +1,7 @@
 import { formatToolResult } from "./protocol/format_tool_result";
 import type {
   AuditLogEntry,
+  BackgroundProbeSample,
   PrepareToolResponse,
   RuntimeMessage,
   ToolRequest,
@@ -10,6 +11,9 @@ import { validateToolRequest } from "./protocol/validate";
 import { appendAuditLog, getAuditLog } from "./storage/audit_log";
 import { getSettings, updateSettings } from "./storage/settings";
 import { executeToolRequest, getToolPolicy } from "./tools/index";
+
+const BACKGROUND_PROBE_STORAGE_KEY = "chatgptToolShimBackgroundProbeSamples";
+const MAX_BACKGROUND_PROBE_SAMPLES = 120;
 
 function makeAuditEntry(
   request: ToolRequest,
@@ -125,6 +129,98 @@ async function executeToolCall(request: ToolRequest): Promise<ToolResult> {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getBackgroundProbeSamples(): Promise<BackgroundProbeSample[]> {
+  const stored = await chrome.storage.local.get(BACKGROUND_PROBE_STORAGE_KEY);
+  const samples = stored[BACKGROUND_PROBE_STORAGE_KEY];
+  return Array.isArray(samples) ? (samples as BackgroundProbeSample[]) : [];
+}
+
+async function storeBackgroundProbeSamples(samples: BackgroundProbeSample[]): Promise<void> {
+  await chrome.storage.local.set({
+    [BACKGROUND_PROBE_STORAGE_KEY]: samples.slice(-MAX_BACKGROUND_PROBE_SAMPLES)
+  });
+}
+
+async function captureBackgroundProbe(tabId: number): Promise<BackgroundProbeSample> {
+  const timestamp = new Date().toISOString();
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const assistantMessages = Array.from(
+          document.querySelectorAll<HTMLElement>('[data-message-author-role="assistant"]')
+        );
+        const latestAssistant = assistantMessages[assistantMessages.length - 1];
+        const latestAssistantText = latestAssistant?.innerText?.trim() ?? "";
+
+        return {
+          visibility: document.visibilityState,
+          focused: document.hasFocus(),
+          readyState: document.readyState,
+          assistantMessages: assistantMessages.length,
+          userMessages: document.querySelectorAll('[data-message-author-role="user"]').length,
+          latestAssistantLength: latestAssistantText.length,
+          latestAssistantHasToolCall: /<tool_call\b/i.test(latestAssistantText)
+        };
+      }
+    });
+
+    const result = results[0]?.result;
+    if (!result) {
+      return {
+        timestamp,
+        tabId,
+        ok: false,
+        error: "executeScript returned no main-frame result."
+      };
+    }
+
+    return {
+      timestamp,
+      tabId,
+      ok: true,
+      ...result
+    };
+  } catch (error) {
+    return {
+      timestamp,
+      tabId,
+      ok: false,
+      error: error instanceof Error ? error.message : "Background executeScript probe failed."
+    };
+  }
+}
+
+async function runBackgroundProbeSeries(
+  tabId: number,
+  durationMs: number,
+  intervalMs: number
+): Promise<BackgroundProbeSample[]> {
+  const boundedDurationMs = Math.max(5_000, Math.min(durationMs, 60_000));
+  const boundedIntervalMs = Math.max(250, Math.min(intervalMs, 5_000));
+  const samples: BackgroundProbeSample[] = [];
+
+  await storeBackgroundProbeSamples(samples);
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt <= boundedDurationMs) {
+    const sample = await captureBackgroundProbe(tabId);
+    samples.push(sample);
+    await storeBackgroundProbeSamples(samples);
+
+    if (Date.now() - startedAt >= boundedDurationMs) {
+      break;
+    }
+    await sleep(boundedIntervalMs);
+  }
+
+  return samples;
+}
+
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
   void (async () => {
     try {
@@ -145,6 +241,28 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
           const settings = await getSettings();
           await appendAuditLog(message.entry, settings);
           sendResponse({ ok: true });
+          return;
+        }
+        case "GET_BACKGROUND_PROBE_SAMPLES":
+          sendResponse(await getBackgroundProbeSamples());
+          return;
+        case "RUN_BACKGROUND_PROBE": {
+          const tabId = _sender.tab?.id;
+          if (tabId === undefined) {
+            sendResponse({
+              ok: false,
+              code: "NO_SENDER_TAB",
+              message: "Background probe must be armed from a ChatGPT tab."
+            });
+            return;
+          }
+
+          const samples = await runBackgroundProbeSeries(
+            tabId,
+            message.durationMs ?? 30_000,
+            message.intervalMs ?? 1_000
+          );
+          sendResponse({ ok: true, tabId, samples: samples.length });
           return;
         }
         case "PREPARE_TOOL_CALL":
