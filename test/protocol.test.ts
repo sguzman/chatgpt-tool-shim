@@ -4,6 +4,7 @@ import { formatToolResult } from "../src/protocol/format_tool_result";
 import { hashString, parseLatestToolCall, stripFencedCodeBlocks } from "../src/protocol/parse_tool_calls";
 import { buildPrimingPrompt, buildToolCatalogText } from "../src/protocol/tool_catalog";
 import { validateToolRequest } from "../src/protocol/validate";
+import { isLikelySendDescriptor } from "../src/ui/selectors";
 
 describe("parseLatestToolCall", () => {
   test("parses a valid tool call", () => {
@@ -58,6 +59,24 @@ describe("helpers", () => {
 
   test("hashString is stable", () => {
     expect(hashString("abc")).toBe(hashString("abc"));
+  });
+});
+
+describe("submit selector semantics", () => {
+  test("accepts known send descriptors", () => {
+    expect(isLikelySendDescriptor("Send prompt send-button")).toBe(true);
+    expect(isLikelySendDescriptor("Send message")).toBe(true);
+  });
+
+  test("rejects plus/add/files/apps controls even when they are form buttons", () => {
+    expect(isLikelySendDescriptor("Add files and more")).toBe(false);
+    expect(isLikelySendDescriptor("Plus Apps Tools")).toBe(false);
+    expect(isLikelySendDescriptor("Attach files" )).toBe(false);
+  });
+
+  test("does not treat generic submit semantics as send semantics", () => {
+    expect(isLikelySendDescriptor("submit")).toBe(false);
+    expect(isLikelySendDescriptor("button type submit")).toBe(false);
   });
 });
 
