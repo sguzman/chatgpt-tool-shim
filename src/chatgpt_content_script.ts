@@ -52,6 +52,9 @@ async function refreshSettings() {
 async function applySettings(patch: Partial<ExtensionSettings>) {
   settings = await sendMessage<ExtensionSettings>({ type: "UPDATE_SETTINGS", patch });
   overlay.setSettings(settings);
+  if (patch.enabled !== undefined) {
+    overlay.setStatus({ state: settings.enabled ? "watching" : "idle" });
+  }
 }
 
 async function configureBroker() {
