@@ -83,10 +83,14 @@ async function submitIfEnabled(request: Pick<ToolRequest, "id" | "name">) {
 
   overlay.setStatus({ state: "submitting", lastTool: request.name });
   recordTrace(request.id, request.name, "SUBMITTING");
-  if (!submitComposer()) {
-    throw new Error("Could not find a usable ChatGPT submit control.");
-  }
-  recordTrace(request.id, request.name, "SUBMITTED");
+
+  const receipt = await submitComposer({ readyTimeoutMs: 5_000, clearTimeoutMs: 5_000 });
+  recordTrace(
+    request.id,
+    request.name,
+    "SUBMITTED",
+    `${receipt.method}; ready after ${receipt.readyAfterMs}ms; composer cleared after ${receipt.clearedAfterMs}ms`
+  );
 }
 
 async function insertInlineResult(request: ToolRequest, text: string) {
