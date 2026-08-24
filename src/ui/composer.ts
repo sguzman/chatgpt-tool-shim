@@ -22,7 +22,29 @@ function composerText(element: HTMLElement | HTMLTextAreaElement | null): string
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    let settled = false;
+    let timeout = 0;
+    const observer = new MutationObserver(() => finish());
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      observer.disconnect();
+      if (timeout) window.clearTimeout(timeout);
+      resolve();
+    };
+
+    // Background tabs can have aggressive timer throttling. Treat the timeout as
+    // a deadline/fallback, but wake immediately when ChatGPT mutates the DOM.
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true
+    });
+    timeout = window.setTimeout(finish, ms);
+  });
 }
 
 export function insertIntoComposer(text: string) {
