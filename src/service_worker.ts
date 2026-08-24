@@ -235,6 +235,122 @@ async function requestBackgroundScan(tabId: number): Promise<void> {
   }
 }
 
+type MainWorldSubmitResponse =
+  | { ok: true; method: "main-world-click"; detail: string }
+  | { ok: false; code: string; message: string };
+
+async function activateChatGptSubmitMainWorld(
+  sender: chrome.runtime.MessageSender
+): Promise<MainWorldSubmitResponse> {
+  const tabId = sender.tab?.id;
+  if (tabId === undefined) {
+    return {
+      ok: false,
+      code: "NO_SENDER_TAB",
+      message: "Main-world submit activation requires a ChatGPT sender tab."
+    };
+  }
+
+  const tab = await chrome.tabs.get(tabId);
+  if (!isChatGptUrl(tab.url ?? "")) {
+    return {
+      ok: false,
+      code: "INVALID_SUBMIT_TARGET",
+      message: "Main-world submit activation is restricted to ChatGPT tabs."
+    };
+  }
+
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: () => {
+        const selectors = [
+          'button[data-testid="send-button"]',
+          'button[aria-label="Send prompt"]',
+          'button[aria-label="Send message"]',
+          'button[aria-label="Send"]'
+        ];
+        const candidates: HTMLButtonElement[] = [];
+        const seen = new Set<HTMLButtonElement>();
+
+        for (const selector of selectors) {
+          for (const candidate of Array.from(document.querySelectorAll<HTMLButtonElement>(selector))) {
+            if (!seen.has(candidate)) {
+              seen.add(candidate);
+              candidates.push(candidate);
+            }
+          }
+        }
+
+        const visible = (element: HTMLElement) => {
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          return (
+            rect.width > 0 &&
+            rect.height > 0 &&
+            style.display !== "none" &&
+            style.visibility !== "hidden"
+          );
+        };
+
+        const button = candidates.find((candidate) => {
+          if (candidate.disabled || !visible(candidate)) return false;
+          const descriptor = [
+            candidate.getAttribute("data-testid"),
+            candidate.getAttribute("aria-label"),
+            candidate.getAttribute("title")
+          ]
+            .filter(Boolean)
+            .join(" ");
+          return !/\b(stop|cancel|voice|mic|record|attach|upload|add files|apps|tools|mode|menu|plus)\b/i.test(
+            descriptor
+          );
+        });
+
+        if (!button) {
+          return {
+            ok: false as const,
+            code: "SEND_BUTTON_NOT_FOUND",
+            message: "No enabled visible ChatGPT Send control was found in the page main world."
+          };
+        }
+
+        const detail = [
+          `tag=${button.tagName.toLowerCase()}`,
+          `type=${button.type || "none"}`,
+          `disabled=${button.disabled}`,
+          `data-testid=${button.getAttribute("data-testid") ?? "none"}`,
+          `aria-label=${button.getAttribute("aria-label") ?? "none"}`,
+          `form=${button.form ? "yes" : "no"}`,
+          `focused=${document.hasFocus()}`
+        ].join(", ");
+
+        // Run the native HTMLElement click from ChatGPT's MAIN world rather than
+        // the extension's isolated content-script world. This is intentionally a
+        // narrow fallback for the already-authorized result-delivery transaction.
+        button.click();
+        return { ok: true as const, method: "main-world-click" as const, detail };
+      }
+    });
+
+    const result = results[0]?.result as MainWorldSubmitResponse | undefined;
+    return (
+      result ?? {
+        ok: false,
+        code: "MAIN_WORLD_NO_RESULT",
+        message: "Main-world submit activation returned no result."
+      }
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      code: "MAIN_WORLD_SUBMIT_ERROR",
+      message: error instanceof Error ? error.message : "Main-world submit activation failed."
+    };
+  }
+}
+
 async function runBackgroundProbeSeries(
   tabId: number,
   durationMs: number,
@@ -396,6 +512,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
           return;
         case "SET_BACKGROUND_MODE":
           sendResponse(await setBackgroundMode(message.enabled, _sender));
+          return;
+        case "ACTIVATE_CHATGPT_SUBMIT_MAIN_WORLD":
+          sendResponse(await activateChatGptSubmitMainWorld(_sender));
           return;
         case "PREPARE_TOOL_CALL":
           sendResponse(
