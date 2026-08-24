@@ -88,7 +88,11 @@ export function insertIntoComposer(text: string) {
   dispatchInput(composer);
 }
 
-export type SubmitMethod = "form-request-submit" | "mouse-events" | "keyboard-enter";
+export type SubmitMethod =
+  | "main-world-click"
+  | "form-request-submit"
+  | "mouse-events"
+  | "keyboard-enter";
 
 export type SubmitReceipt = {
   method: SubmitMethod;
@@ -96,6 +100,10 @@ export type SubmitReceipt = {
   observedAfterMs: number;
   signal: "composer-cleared" | "user-message-added";
 };
+
+type MainWorldSubmitResponse =
+  | { ok: true; method: "main-world-click"; detail: string }
+  | { ok: false; code: string; message: string };
 
 function countUserMessages(): number {
   return document.querySelectorAll('[data-message-author-role="user"]').length;
@@ -223,6 +231,20 @@ function composerHasAttachment(): boolean {
   );
 }
 
+async function activateMainWorldSubmit(): Promise<string> {
+  const response = (await chrome.runtime.sendMessage({
+    type: "ACTIVATE_CHATGPT_SUBMIT_MAIN_WORLD"
+  })) as MainWorldSubmitResponse;
+
+  if (!response?.ok) {
+    throw new Error(
+      response ? `${response.code}: ${response.message}` : "Main-world submit activation returned no response."
+    );
+  }
+
+  return response.detail;
+}
+
 export async function submitComposer(
   options: { readyTimeoutMs?: number; observeTimeoutMs?: number } = {}
 ): Promise<SubmitReceipt> {
@@ -230,16 +252,33 @@ export async function submitComposer(
     options.readyTimeoutMs ?? 5_000
   );
   const initialUserMessageCount = countUserMessages();
+  const hasAttachment = composerHasAttachment();
   // Attachment-bearing sends have a slower page-side acknowledgement path than
   // ordinary text sends. Preserve the caller's timeout for text, but never use
   // the short text timeout when a file is present.
   const requestedObserveTimeoutMs = options.observeTimeoutMs ?? 1_750;
-  const observeTimeoutMs = composerHasAttachment()
+  const observeTimeoutMs = hasAttachment
     ? Math.max(requestedObserveTimeoutMs, 5_000)
     : requestedObserveTimeoutMs;
   const attempts: string[] = [];
 
-  const methods: Array<{ method: SubmitMethod; run: () => void }> = [
+  const methods: Array<{
+    method: SubmitMethod;
+    run: () => void | string | Promise<void | string>;
+  }> = [];
+
+  // The normal isolated-world activation ladder works for unfocused inline
+  // results, but live Edge testing shows attachment-bearing sends can ignore all
+  // three methods while unfocused even after upload readiness is verified. Try
+  // one narrow service-worker MAIN-world click first in exactly that state.
+  if (hasAttachment && !document.hasFocus()) {
+    methods.push({
+      method: "main-world-click",
+      run: () => activateMainWorldSubmit()
+    });
+  }
+
+  methods.push(
     {
       method: "form-request-submit",
       run: () => requestFormSubmit(button, composer)
@@ -252,12 +291,12 @@ export async function submitComposer(
       method: "keyboard-enter",
       run: () => dispatchEnter(findComposer() ?? composer)
     }
-  ];
+  );
 
   for (const attempt of methods) {
     try {
-      attempt.run();
-      attempts.push(`${attempt.method}: invoked`);
+      const detail = await attempt.run();
+      attempts.push(`${attempt.method}: invoked${detail ? ` (${detail})` : ""}`);
     } catch (error) {
       attempts.push(
         `${attempt.method}: ${error instanceof Error ? error.message : "activation failed"}`
