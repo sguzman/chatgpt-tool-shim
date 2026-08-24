@@ -72,6 +72,13 @@ export type BackgroundProbeSample = {
   error?: string;
 };
 
+export type BackgroundModeState = {
+  enabled: boolean;
+  tabId?: number;
+  url?: string;
+  startedAt?: string;
+};
+
 export type ExtensionSettings = {
   enabled: boolean;
   autoRunSafeTools: boolean;
@@ -114,5 +121,7 @@ export type RuntimeMessage =
   | { type: "APPEND_AUDIT_LOG"; entry: AuditLogEntry }
   | { type: "GET_BACKGROUND_PROBE_SAMPLES" }
   | { type: "RUN_BACKGROUND_PROBE"; durationMs?: number; intervalMs?: number }
+  | { type: "GET_BACKGROUND_MODE_STATE" }
+  | { type: "SET_BACKGROUND_MODE"; enabled: boolean }
   | { type: "PREPARE_TOOL_CALL"; call: ParsedToolCall; source: ToolRequestSource }
   | { type: "EXECUTE_TOOL_CALL"; request: ToolRequest };
