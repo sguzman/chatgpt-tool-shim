@@ -1,6 +1,7 @@
 import { formatToolResult } from "./protocol/format_tool_result";
 import type {
   AuditLogEntry,
+  BackgroundModeState,
   BackgroundProbeSample,
   PrepareToolResponse,
   RuntimeMessage,
@@ -13,7 +14,12 @@ import { getSettings, updateSettings } from "./storage/settings";
 import { executeToolRequest, getToolPolicy } from "./tools/index";
 
 const BACKGROUND_PROBE_STORAGE_KEY = "chatgptToolShimBackgroundProbeSamples";
+const BACKGROUND_MODE_STORAGE_KEY = "chatgptToolShimBackgroundModeState";
 const MAX_BACKGROUND_PROBE_SAMPLES = 120;
+const BACKGROUND_MODE_INTERVAL_MS = 1_000;
+
+let backgroundLoopGeneration = 0;
+let backgroundLoopTabId: number | null = null;
 
 function makeAuditEntry(
   request: ToolRequest,
@@ -145,6 +151,26 @@ async function storeBackgroundProbeSamples(samples: BackgroundProbeSample[]): Pr
   });
 }
 
+async function appendBackgroundProbeSample(sample: BackgroundProbeSample): Promise<void> {
+  const samples = await getBackgroundProbeSamples();
+  samples.push(sample);
+  await storeBackgroundProbeSamples(samples);
+}
+
+async function getBackgroundModeState(): Promise<BackgroundModeState> {
+  const stored = await chrome.storage.local.get(BACKGROUND_MODE_STORAGE_KEY);
+  const state = stored[BACKGROUND_MODE_STORAGE_KEY] as BackgroundModeState | undefined;
+  return state ?? { enabled: false };
+}
+
+async function storeBackgroundModeState(state: BackgroundModeState): Promise<void> {
+  await chrome.storage.local.set({ [BACKGROUND_MODE_STORAGE_KEY]: state });
+}
+
+function isChatGptUrl(url: string): boolean {
+  return url.startsWith("https://chatgpt.com/") || url.startsWith("https://chat.openai.com/");
+}
+
 async function captureBackgroundProbe(tabId: number): Promise<BackgroundProbeSample> {
   const timestamp = new Date().toISOString();
   try {
@@ -221,6 +247,91 @@ async function runBackgroundProbeSeries(
   return samples;
 }
 
+async function runBackgroundModeLoop(tabId: number, generation: number): Promise<void> {
+  try {
+    while (generation === backgroundLoopGeneration) {
+      const state = await getBackgroundModeState();
+      if (!state.enabled || state.tabId !== tabId) {
+        break;
+      }
+
+      const sample = await captureBackgroundProbe(tabId);
+      await appendBackgroundProbeSample(sample);
+
+      if (!sample.ok) {
+        const tabStillExists = await chrome.tabs.get(tabId).then(
+          () => true,
+          () => false
+        );
+        if (!tabStillExists) {
+          await storeBackgroundModeState({ enabled: false });
+          break;
+        }
+      }
+
+      await sleep(BACKGROUND_MODE_INTERVAL_MS);
+    }
+  } finally {
+    if (generation === backgroundLoopGeneration && backgroundLoopTabId === tabId) {
+      backgroundLoopTabId = null;
+    }
+  }
+}
+
+function ensureBackgroundModeLoop(tabId: number): void {
+  if (backgroundLoopTabId === tabId) return;
+
+  const generation = ++backgroundLoopGeneration;
+  backgroundLoopTabId = tabId;
+  void runBackgroundModeLoop(tabId, generation);
+}
+
+function stopBackgroundModeLoop(): void {
+  backgroundLoopGeneration += 1;
+  backgroundLoopTabId = null;
+}
+
+async function setBackgroundMode(
+  enabled: boolean,
+  sender: chrome.runtime.MessageSender
+): Promise<BackgroundModeState> {
+  if (!enabled) {
+    stopBackgroundModeLoop();
+    const state: BackgroundModeState = { enabled: false };
+    await storeBackgroundModeState(state);
+    return state;
+  }
+
+  const tabId = sender.tab?.id;
+  const url = sender.tab?.url ?? "";
+  if (tabId === undefined || !isChatGptUrl(url)) {
+    throw new Error("Background Mode must be enabled from a ChatGPT tab.");
+  }
+
+  const state: BackgroundModeState = {
+    enabled: true,
+    tabId,
+    url,
+    startedAt: new Date().toISOString()
+  };
+  await storeBackgroundModeState(state);
+  await storeBackgroundProbeSamples([]);
+  ensureBackgroundModeLoop(tabId);
+  return state;
+}
+
+async function getBackgroundModeStateForSender(
+  sender: chrome.runtime.MessageSender
+): Promise<BackgroundModeState> {
+  const state = await getBackgroundModeState();
+  if (!state.enabled) return state;
+
+  return {
+    ...state,
+    enabled: state.tabId !== undefined && state.tabId === sender.tab?.id
+  };
+}
+
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
   void (async () => {
     try {
@@ -265,6 +376,12 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
           sendResponse({ ok: true, tabId, samples: samples.length });
           return;
         }
+        case "GET_BACKGROUND_MODE_STATE":
+          sendResponse(await getBackgroundModeStateForSender(_sender));
+          return;
+        case "SET_BACKGROUND_MODE":
+          sendResponse(await setBackgroundMode(message.enabled, _sender));
+          return;
         case "PREPARE_TOOL_CALL":
           sendResponse(
             await prepareToolCall(
@@ -304,3 +421,19 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
 
   return true;
 });
+
+void (async () => {
+  const state = await getBackgroundModeState();
+  if (!state.enabled || state.tabId === undefined) return;
+
+  try {
+    const tab = await chrome.tabs.get(state.tabId);
+    if (isChatGptUrl(tab.url ?? "")) {
+      ensureBackgroundModeLoop(state.tabId);
+    } else {
+      await storeBackgroundModeState({ enabled: false });
+    }
+  } catch {
+    await storeBackgroundModeState({ enabled: false });
+  }
+})();
