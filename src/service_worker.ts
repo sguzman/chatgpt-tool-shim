@@ -221,6 +221,20 @@ async function captureBackgroundProbe(tabId: number): Promise<BackgroundProbeSam
   }
 }
 
+async function requestBackgroundScan(tabId: number): Promise<void> {
+  try {
+    // Explicitly wake the content-script orchestration path. executeScript() can
+    // inspect an unfocused tab, but that does not reliably schedule the page's
+    // MutationObserver. A targeted extension message gives Background Mode a
+    // deterministic scan trigger instead of relying on incidental DOM activity.
+    await chrome.tabs.sendMessage(tabId, { type: "BACKGROUND_SCAN_NOW" });
+  } catch {
+    // The diagnostic probe remains authoritative for tab existence. A missing
+    // receiver can occur transiently during navigation/reload; the next tick
+    // retries without disabling Background Mode.
+  }
+}
+
 async function runBackgroundProbeSeries(
   tabId: number,
   durationMs: number,
@@ -257,6 +271,7 @@ async function runBackgroundModeLoop(tabId: number, generation: number): Promise
 
       const sample = await captureBackgroundProbe(tabId);
       await appendBackgroundProbeSample(sample);
+      await requestBackgroundScan(tabId);
 
       if (!sample.ok) {
         const tabStillExists = await chrome.tabs.get(tabId).then(
