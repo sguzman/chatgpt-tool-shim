@@ -58,6 +58,20 @@ export type AuditLogEntry = {
   detail: string;
 };
 
+export type BackgroundProbeSample = {
+  timestamp: string;
+  tabId: number;
+  ok: boolean;
+  visibility?: DocumentVisibilityState;
+  focused?: boolean;
+  readyState?: DocumentReadyState;
+  assistantMessages?: number;
+  userMessages?: number;
+  latestAssistantLength?: number;
+  latestAssistantHasToolCall?: boolean;
+  error?: string;
+};
+
 export type ExtensionSettings = {
   enabled: boolean;
   autoRunSafeTools: boolean;
@@ -98,5 +112,7 @@ export type RuntimeMessage =
   | { type: "UPDATE_SETTINGS"; patch: Partial<ExtensionSettings> }
   | { type: "GET_AUDIT_LOG" }
   | { type: "APPEND_AUDIT_LOG"; entry: AuditLogEntry }
+  | { type: "GET_BACKGROUND_PROBE_SAMPLES" }
+  | { type: "RUN_BACKGROUND_PROBE"; durationMs?: number; intervalMs?: number }
   | { type: "PREPARE_TOOL_CALL"; call: ParsedToolCall; source: ToolRequestSource }
   | { type: "EXECUTE_TOOL_CALL"; request: ToolRequest };
