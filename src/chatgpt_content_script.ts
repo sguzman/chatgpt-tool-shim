@@ -354,6 +354,16 @@ function mountObserver() {
   scheduleScan();
 }
 
+function mountBackgroundScanListener() {
+  chrome.runtime.onMessage.addListener((message: { type?: string }, _sender, sendResponse) => {
+    if (message?.type !== "BACKGROUND_SCAN_NOW") return false;
+
+    scheduleScan();
+    sendResponse({ ok: true });
+    return false;
+  });
+}
+
 async function openLog() {
   const entries = await sendMessage<AuditLogEntry[]>({ type: "GET_AUDIT_LOG" });
   overlay.showLog(entries);
@@ -446,6 +456,7 @@ async function init() {
 
   await Promise.all([refreshSettings(), refreshBackgroundMode()]);
   overlay.setStatus({ state: "watching" });
+  mountBackgroundScanListener();
   mountObserver();
 }
 
