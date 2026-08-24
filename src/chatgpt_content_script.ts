@@ -3,6 +3,7 @@ import { parseLatestToolCall } from "./protocol/parse_tool_calls";
 import { buildPrimingPrompt, buildToolCatalogText } from "./protocol/tool_catalog";
 import type {
   AuditLogEntry,
+  BackgroundModeState,
   BackgroundProbeSample,
   ExtensionSettings,
   PrepareToolResponse,
@@ -69,6 +70,25 @@ function recordTrace(callId: string, toolName: string, state: string, detail?: s
 async function refreshSettings() {
   settings = await sendMessage<ExtensionSettings>({ type: "GET_SETTINGS" });
   overlay.setSettings(settings);
+}
+
+async function refreshBackgroundMode() {
+  const state = await sendMessage<BackgroundModeState>({ type: "GET_BACKGROUND_MODE_STATE" });
+  overlay.setBackgroundMode(state.enabled);
+}
+
+async function setBackgroundMode(enabled: boolean) {
+  try {
+    const state = await sendMessage<BackgroundModeState>({ type: "SET_BACKGROUND_MODE", enabled });
+    overlay.setBackgroundMode(state.enabled);
+    overlay.setStatus({ state: "watching", lastError: "none" });
+  } catch (error) {
+    overlay.setBackgroundMode(false);
+    overlay.setStatus({
+      state: "error",
+      lastError: error instanceof Error ? error.message : "Background Mode update failed."
+    });
+  }
 }
 
 async function applySettings(patch: Partial<ExtensionSettings>) {
@@ -387,6 +407,7 @@ async function init() {
     onToggleAutoRun: (autoRunSafeTools) => void applySettings({ autoRunSafeTools }),
     onToggleAutoSubmit: (autoSubmitToolResults) => void applySettings({ autoSubmitToolResults }),
     onToggleAttachmentResults: (attachmentResultsEnabled) => void applySettings({ attachmentResultsEnabled }),
+    onToggleBackgroundMode: (enabled) => void setBackgroundMode(enabled),
     onConfigureBroker: () => {
       void configureBroker().catch((error) => {
         overlay.setStatus({
@@ -423,7 +444,7 @@ async function init() {
     }
   });
 
-  await refreshSettings();
+  await Promise.all([refreshSettings(), refreshBackgroundMode()]);
   overlay.setStatus({ state: "watching" });
   mountObserver();
 }
