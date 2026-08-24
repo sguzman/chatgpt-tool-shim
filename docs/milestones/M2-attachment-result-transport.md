@@ -14,9 +14,13 @@ The first live Edge attachment run succeeded for a 65,536-byte broker payload. T
 
 The permission pause itself is correct behavior; the usability follow-up is to make a pending confirmation visually harder to miss in the movable HUD.
 
-A later 1,310,720-byte (1.25 MiB) broker test verified that the large-result generator, JSON envelope, synthetic File creation, upload path, attachment-ready gate, and model-readable attachment all work above 1 MiB. The received artifact reports protocol `chat-shim-tool-result/v1`, the matching call ID, `broker.large_result`, and `requested_bytes: 1310720`.
+A later 1,310,720-byte (1.25 MiB) broker test verified that the large-result generator, JSON envelope, synthetic File creation, upload path, and model-readable attachment all work above 1 MiB. The received artifact reports protocol `chat-shim-tool-result/v1`, the matching call ID, `broker.large_result`, and `requested_bytes: 1310720`.
 
-That same run exposed a separate background-submission failure after the attachment had been prepared. While persistent Background Mode was enabled and Edge was unfocused, the shim found the correct enabled `send-button`, then attempted form `requestSubmit`, synthetic mouse activation, and Enter-key activation. None produced the existing composer-cleared/user-message-added success signal within the configured 1,750 ms observation window, so the shim emitted a compact `RESULT_DELIVERY_ERROR`. The >1 MiB attachment transport is therefore verified, but unfocused attachment Auto Submit is not yet verified. Diagnostics from the failing run should determine whether the attachment readiness gate fired too early or whether attachment-bearing submits simply need a longer/different acknowledgement signal before fallback activation.
+That same run exposed a separate attachment-submission failure. The permission boundary means the run was not a fully unattended background-attachment acceptance test: detection and `WAITING_CONFIRMATION` occurred while unfocused, but the user necessarily refocused Edge to click **Run**. Diagnostics then showed `CONFIRMED`, dispatch, result packaging, `ATTACHING`, the readiness gate, and the start of `SUBMITTING` while focused. The user moved away again and the eventual `DELIVERY_ERROR` occurred unfocused. The text and attachment remained in the composer until the user manually submitted them.
+
+The diagnostics also identified a concrete readiness bug rather than merely a background-mode problem: the 1.31 MB attachment was declared `ATTACHMENT_READY` only **70 ms** after attachment started. The readiness implementation counted three successful polls, but its wait helper intentionally wakes early on arbitrary DOM mutation to support background tabs. Three DOM wakeups could therefore occur in a few milliseconds and were not evidence that an upload had actually settled.
+
+The readiness implementation is now hardened. It measures continuous **wall-clock stability** instead of poll count, resets the stable interval whenever the filename disappears or an upload/processing indicator is visible, and inspects the filename chip's nearby DOM for busy state. The minimum stable window is 1.5 seconds for files up to 256 KiB, 3 seconds through 1 MiB, and 5 seconds above 1 MiB. Attachment-bearing Auto Submit also receives a minimum five-second submission-observation window per activation method instead of inheriting the 1.75-second plain-text acknowledgement window. This fix remains runtime-unverified until the next live attachment retry.
 
 ## Checklist
 
@@ -29,16 +33,18 @@ That same run exposed a separate background-submission failure after the attachm
 - [x] Verify a stable ChatGPT file-input/upload path in current Edge.
 - [x] Verify upload without user file-picker interaction.
 - [x] Verify attachment upload presence/start detection in the live page.
-- [x] Verify attachment-ready completion state.
+- [x] Implement attachment-ready completion state.
+- [x] Harden readiness against mutation-driven false-positive stability.
 - [x] Gate auto-submit behind attachment-ready in the implementation.
 - [x] Submit `<tool_result_ref>` only after the readiness gate resolves.
 - [x] Handle upload failure with a compact error result.
 - [x] Reuse call fingerprint dedupe to prevent duplicate delivery on repeated DOM mutations.
 - [x] Run JSON attachment test in the real page.
 - [x] Verify automatic submission of attachment + `<tool_result_ref>` with no manual Send action for the 65,536-byte foreground path.
+- [ ] Reverify attachment Auto Submit after wall-clock readiness hardening.
 - [ ] Test plain-text/source-file attachment.
 - [x] Test >1 MB result.
-- [ ] Verify attachment + `<tool_result_ref>` Auto Submit while Edge is unfocused.
+- [ ] Verify attachment + `<tool_result_ref>` Auto Submit while Edge is unfocused after approval.
 - [ ] Test binary attachment.
 - [x] Add attachment-state events to extension diagnostics.
 
@@ -46,4 +52,4 @@ That same run exposed a separate background-submission failure after the attachm
 
 A large tool result travels from tool runtime to ChatGPT as an attachment and the model-visible reference is submitted automatically only after upload completion.
 
-**Exit condition verified in the live Edge session for the 65,536-byte JSON result path. The >1 MiB transport itself is also verified; unfocused attachment Auto Submit remains unresolved.**
+**Exit condition verified in the live Edge session for the 65,536-byte JSON result path. The >1 MiB transport itself is also verified; the 1.25 MiB run exposed and motivated a readiness-gate fix that still requires live revalidation.**
