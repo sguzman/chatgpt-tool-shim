@@ -5,9 +5,13 @@
   "description": "Client-side pseudo-tool-calling bridge for ChatGPT web.",
   "type": "module",
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "clean": "rm -rf dist",
-    "test": "vitest run"
+    "build": "npm run build:extension && npm run build:server",
+    "build:extension": "node scripts/build.mjs",
+    "build:server": "node scripts/build-server.mjs",
+    "server:start": "node server/dist/server.js",
+    "clean": "rm -rf dist server/dist",
+    "test": "vitest run",
+    "debug:bundle": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/debug-bundle.ps1"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.269",

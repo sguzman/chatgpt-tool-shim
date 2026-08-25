@@ -8,7 +8,11 @@ import { clockNow } from "./clock_now";
 import { hello } from "./hello";
 import { localMcpCall } from "./local_mcp_call";
 
-type ToolHandler = (args: any, settings: ExtensionSettings) => Promise<unknown>;
+type ToolHandler = (
+  args: any,
+  settings: ExtensionSettings,
+  request: ToolRequest
+) => Promise<unknown>;
 
 export const TOOL_POLICIES: Record<string, ToolPolicy> = {
   hello: { mode: "auto", risk: "none" },
@@ -29,7 +33,8 @@ const toolHandlers: Record<string, ToolHandler> = {
   "browser.tab.metadata": async (args) => browserTabMetadata(args),
   "browser.tab.links": async (args) => browserTabLinks(args),
   "browser.tab.read_text": async (args) => browserTabReadText(args),
-  "local.mcp.call": async (args, settings) => localMcpCall(args, settings)
+  "local.mcp.call": async (args, settings, request) =>
+    localMcpCall(args, settings, request.id)
 };
 
 export function getToolPolicy(name: string): ToolPolicy | null {
@@ -44,5 +49,5 @@ export async function executeToolRequest(
   if (!handler) {
     throw new Error(`No handler registered for tool ${request.name}.`);
   }
-  return handler(request.args, settings);
+  return handler(request.args, settings, request);
 }

@@ -58,14 +58,39 @@ export type AuditLogEntry = {
   detail: string;
 };
 
+export type BackgroundProbeSample = {
+  timestamp: string;
+  tabId: number;
+  ok: boolean;
+  visibility?: DocumentVisibilityState;
+  focused?: boolean;
+  readyState?: DocumentReadyState;
+  assistantMessages?: number;
+  userMessages?: number;
+  latestAssistantLength?: number;
+  latestAssistantHasToolCall?: boolean;
+  error?: string;
+};
+
+export type BackgroundModeState = {
+  enabled: boolean;
+  tabId?: number;
+  url?: string;
+  startedAt?: string;
+};
+
 export type ExtensionSettings = {
   enabled: boolean;
   autoRunSafeTools: boolean;
   autoSubmitToolResults: boolean;
   localhostBridgeEnabled: boolean;
   localhostBridgeUrl: string;
+  localhostBridgeToken: string;
   sensitiveDomainBlocklist: string[];
   maxAuditEntries: number;
+  attachmentResultsEnabled: boolean;
+  attachmentThresholdBytes: number;
+  attachmentUploadTimeoutMs: number;
 };
 
 export type PrepareToolResponse =
@@ -94,5 +119,11 @@ export type RuntimeMessage =
   | { type: "UPDATE_SETTINGS"; patch: Partial<ExtensionSettings> }
   | { type: "GET_AUDIT_LOG" }
   | { type: "APPEND_AUDIT_LOG"; entry: AuditLogEntry }
+  | { type: "GET_BACKGROUND_PROBE_SAMPLES" }
+  | { type: "RUN_BACKGROUND_PROBE"; durationMs?: number; intervalMs?: number }
+  | { type: "GET_BACKGROUND_MODE_STATE" }
+  | { type: "SET_BACKGROUND_MODE"; enabled: boolean }
+  | { type: "ACTIVATE_CHATGPT_SUBMIT_MAIN_WORLD" }
+  | { type: "ACTIVATE_CHATGPT_SUBMIT_WITH_FOCUS" }
   | { type: "PREPARE_TOOL_CALL"; call: ParsedToolCall; source: ToolRequestSource }
   | { type: "EXECUTE_TOOL_CALL"; request: ToolRequest };

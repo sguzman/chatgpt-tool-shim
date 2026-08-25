@@ -1,6 +1,8 @@
 import { formatToolResult } from "./protocol/format_tool_result";
 import type {
   AuditLogEntry,
+  BackgroundModeState,
+  BackgroundProbeSample,
   PrepareToolResponse,
   RuntimeMessage,
   ToolRequest,
@@ -10,6 +12,14 @@ import { validateToolRequest } from "./protocol/validate";
 import { appendAuditLog, getAuditLog } from "./storage/audit_log";
 import { getSettings, updateSettings } from "./storage/settings";
 import { executeToolRequest, getToolPolicy } from "./tools/index";
+
+const BACKGROUND_PROBE_STORAGE_KEY = "chatgptToolShimBackgroundProbeSamples";
+const BACKGROUND_MODE_STORAGE_KEY = "chatgptToolShimBackgroundModeState";
+const MAX_BACKGROUND_PROBE_SAMPLES = 120;
+const BACKGROUND_MODE_INTERVAL_MS = 1_000;
+
+let backgroundLoopGeneration = 0;
+let backgroundLoopTabId: number | null = null;
 
 function makeAuditEntry(
   request: ToolRequest,
@@ -125,6 +135,433 @@ async function executeToolCall(request: ToolRequest): Promise<ToolResult> {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getBackgroundProbeSamples(): Promise<BackgroundProbeSample[]> {
+  const stored = await chrome.storage.local.get(BACKGROUND_PROBE_STORAGE_KEY);
+  const samples = stored[BACKGROUND_PROBE_STORAGE_KEY];
+  return Array.isArray(samples) ? (samples as BackgroundProbeSample[]) : [];
+}
+
+async function storeBackgroundProbeSamples(samples: BackgroundProbeSample[]): Promise<void> {
+  await chrome.storage.local.set({
+    [BACKGROUND_PROBE_STORAGE_KEY]: samples.slice(-MAX_BACKGROUND_PROBE_SAMPLES)
+  });
+}
+
+async function appendBackgroundProbeSample(sample: BackgroundProbeSample): Promise<void> {
+  const samples = await getBackgroundProbeSamples();
+  samples.push(sample);
+  await storeBackgroundProbeSamples(samples);
+}
+
+async function getBackgroundModeState(): Promise<BackgroundModeState> {
+  const stored = await chrome.storage.local.get(BACKGROUND_MODE_STORAGE_KEY);
+  const state = stored[BACKGROUND_MODE_STORAGE_KEY] as BackgroundModeState | undefined;
+  return state ?? { enabled: false };
+}
+
+async function storeBackgroundModeState(state: BackgroundModeState): Promise<void> {
+  await chrome.storage.local.set({ [BACKGROUND_MODE_STORAGE_KEY]: state });
+}
+
+function isChatGptUrl(url: string): boolean {
+  return url.startsWith("https://chatgpt.com/") || url.startsWith("https://chat.openai.com/");
+}
+
+async function captureBackgroundProbe(tabId: number): Promise<BackgroundProbeSample> {
+  const timestamp = new Date().toISOString();
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const assistantMessages = Array.from(
+          document.querySelectorAll<HTMLElement>('[data-message-author-role="assistant"]')
+        );
+        const latestAssistant = assistantMessages[assistantMessages.length - 1];
+        const latestAssistantText = latestAssistant?.innerText?.trim() ?? "";
+
+        return {
+          visibility: document.visibilityState,
+          focused: document.hasFocus(),
+          readyState: document.readyState,
+          assistantMessages: assistantMessages.length,
+          userMessages: document.querySelectorAll('[data-message-author-role="user"]').length,
+          latestAssistantLength: latestAssistantText.length,
+          latestAssistantHasToolCall: /<tool_call\b/i.test(latestAssistantText)
+        };
+      }
+    });
+
+    const result = results[0]?.result;
+    if (!result) {
+      return {
+        timestamp,
+        tabId,
+        ok: false,
+        error: "executeScript returned no main-frame result."
+      };
+    }
+
+    return {
+      timestamp,
+      tabId,
+      ok: true,
+      ...result
+    };
+  } catch (error) {
+    return {
+      timestamp,
+      tabId,
+      ok: false,
+      error: error instanceof Error ? error.message : "Background executeScript probe failed."
+    };
+  }
+}
+
+async function requestBackgroundScan(tabId: number): Promise<void> {
+  try {
+    // Explicitly wake the content-script orchestration path. executeScript() can
+    // inspect an unfocused tab, but that does not reliably schedule the page's
+    // MutationObserver. A targeted extension message gives Background Mode a
+    // deterministic scan trigger instead of relying on incidental DOM activity.
+    await chrome.tabs.sendMessage(tabId, { type: "BACKGROUND_SCAN_NOW" });
+  } catch {
+    // The diagnostic probe remains authoritative for tab existence. A missing
+    // receiver can occur transiently during navigation/reload; the next tick
+    // retries without disabling Background Mode.
+  }
+}
+
+type MainWorldSubmitResponse =
+  | { ok: true; method: "main-world-click"; detail: string }
+  | { ok: false; code: string; message: string };
+
+type FocusSubmitResponse =
+  | { ok: true; method: "focus-main-world-click"; detail: string }
+  | { ok: false; code: string; message: string };
+
+async function activateChatGptSubmitMainWorld(
+  sender: chrome.runtime.MessageSender
+): Promise<MainWorldSubmitResponse> {
+  const tabId = sender.tab?.id;
+  if (tabId === undefined) {
+    return {
+      ok: false,
+      code: "NO_SENDER_TAB",
+      message: "Main-world submit activation requires a ChatGPT sender tab."
+    };
+  }
+
+  const tab = await chrome.tabs.get(tabId);
+  if (!isChatGptUrl(tab.url ?? "")) {
+    return {
+      ok: false,
+      code: "INVALID_SUBMIT_TARGET",
+      message: "Main-world submit activation is restricted to ChatGPT tabs."
+    };
+  }
+
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: () => {
+        const selectors = [
+          'button[data-testid="send-button"]',
+          'button[aria-label="Send prompt"]',
+          'button[aria-label="Send message"]',
+          'button[aria-label="Send"]'
+        ];
+        const candidates: HTMLButtonElement[] = [];
+        const seen = new Set<HTMLButtonElement>();
+
+        for (const selector of selectors) {
+          for (const candidate of Array.from(document.querySelectorAll<HTMLButtonElement>(selector))) {
+            if (!seen.has(candidate)) {
+              seen.add(candidate);
+              candidates.push(candidate);
+            }
+          }
+        }
+
+        const visible = (element: HTMLElement) => {
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          return (
+            rect.width > 0 &&
+            rect.height > 0 &&
+            style.display !== "none" &&
+            style.visibility !== "hidden"
+          );
+        };
+
+        const button = candidates.find((candidate) => {
+          if (candidate.disabled || !visible(candidate)) return false;
+          const descriptor = [
+            candidate.getAttribute("data-testid"),
+            candidate.getAttribute("aria-label"),
+            candidate.getAttribute("title")
+          ]
+            .filter(Boolean)
+            .join(" ");
+          return !/\b(stop|cancel|voice|mic|record|attach|upload|add files|apps|tools|mode|menu|plus)\b/i.test(
+            descriptor
+          );
+        });
+
+        if (!button) {
+          return {
+            ok: false as const,
+            code: "SEND_BUTTON_NOT_FOUND",
+            message: "No enabled visible ChatGPT Send control was found in the page main world."
+          };
+        }
+
+        const detail = [
+          `tag=${button.tagName.toLowerCase()}`,
+          `type=${button.type || "none"}`,
+          `disabled=${button.disabled}`,
+          `data-testid=${button.getAttribute("data-testid") ?? "none"}`,
+          `aria-label=${button.getAttribute("aria-label") ?? "none"}`,
+          `form=${button.form ? "yes" : "no"}`,
+          `focused=${document.hasFocus()}`
+        ].join(", ");
+
+        // Run the native HTMLElement click from ChatGPT's MAIN world rather than
+        // the extension's isolated content-script world.
+        button.click();
+        return { ok: true as const, method: "main-world-click" as const, detail };
+      }
+    });
+
+    const result = results[0]?.result as MainWorldSubmitResponse | undefined;
+    return (
+      result ?? {
+        ok: false,
+        code: "MAIN_WORLD_NO_RESULT",
+        message: "Main-world submit activation returned no result."
+      }
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      code: "MAIN_WORLD_SUBMIT_ERROR",
+      message: error instanceof Error ? error.message : "Main-world submit activation failed."
+    };
+  }
+}
+
+async function activateChatGptSubmitWithFocus(
+  sender: chrome.runtime.MessageSender
+): Promise<FocusSubmitResponse> {
+  const tabId = sender.tab?.id;
+  if (tabId === undefined) {
+    return {
+      ok: false,
+      code: "NO_SENDER_TAB",
+      message: "Focus-assisted submit activation requires a ChatGPT sender tab."
+    };
+  }
+
+  const tab = await chrome.tabs.get(tabId);
+  if (!isChatGptUrl(tab.url ?? "")) {
+    return {
+      ok: false,
+      code: "INVALID_SUBMIT_TARGET",
+      message: "Focus-assisted submit activation is restricted to ChatGPT tabs."
+    };
+  }
+
+  const targetWindowId = tab.windowId;
+  const targetWindow = await chrome.windows.get(targetWindowId);
+  const previousActiveTabs = await chrome.tabs.query({ active: true, windowId: targetWindowId });
+  const previousActiveTabId = previousActiveTabs[0]?.id;
+  const targetWasFocused = targetWindow.focused;
+  const targetTabWasActive = tab.active;
+  let focusAcquired = false;
+  let tabActivated = false;
+  let restoreDetail = "restore=not-needed";
+
+  try {
+    if (!tab.active) {
+      await chrome.tabs.update(tabId, { active: true });
+      tabActivated = true;
+    }
+
+    if (!targetWindow.focused) {
+      await chrome.windows.update(targetWindowId, { focused: true });
+      focusAcquired = true;
+    }
+
+    // Give the OS/window manager and ChatGPT a short interval to observe the
+    // focus transition before invoking the exact MAIN-world click used in the
+    // previous experiment.
+    await sleep(150);
+    const response = await activateChatGptSubmitMainWorld(sender);
+    if (!response.ok) return response;
+
+    // Keep the focus pulse alive briefly so any synchronous/near-synchronous
+    // attachment-send transaction can begin before we relinquish the window.
+    await sleep(750);
+
+    return {
+      ok: true,
+      method: "focus-main-world-click",
+      detail: [
+        response.detail,
+        `windowId=${targetWindowId}`,
+        `targetWasFocused=${targetWasFocused}`,
+        `targetTabWasActive=${targetTabWasActive}`,
+        `focusAcquired=${focusAcquired}`,
+        `tabActivated=${tabActivated}`,
+        restoreDetail
+      ].join(", ")
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      code: "FOCUS_SUBMIT_ERROR",
+      message: error instanceof Error ? error.message : "Focus-assisted submit activation failed."
+    };
+  } finally {
+    if (focusAcquired) {
+      try {
+        // Chrome documents focused:false as bringing the next window in z-order
+        // forward. This is a best-effort restoration of the user's prior context;
+        // extensions cannot name or reactivate an arbitrary external application.
+        await chrome.windows.update(targetWindowId, { focused: false });
+        restoreDetail = "restore=window-defocused";
+      } catch {
+        restoreDetail = "restore=window-defocus-failed";
+      }
+    }
+
+    if (tabActivated && previousActiveTabId !== undefined && previousActiveTabId !== tabId) {
+      try {
+        await chrome.tabs.update(previousActiveTabId, { active: true });
+      } catch {
+        // Do not turn a successful send into a delivery error merely because the
+        // previous tab could not be restored after navigation/window changes.
+      }
+    }
+  }
+}
+
+async function runBackgroundProbeSeries(
+  tabId: number,
+  durationMs: number,
+  intervalMs: number
+): Promise<BackgroundProbeSample[]> {
+  const boundedDurationMs = Math.max(5_000, Math.min(durationMs, 60_000));
+  const boundedIntervalMs = Math.max(250, Math.min(intervalMs, 5_000));
+  const samples: BackgroundProbeSample[] = [];
+
+  await storeBackgroundProbeSamples(samples);
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt <= boundedDurationMs) {
+    const sample = await captureBackgroundProbe(tabId);
+    samples.push(sample);
+    await storeBackgroundProbeSamples(samples);
+
+    if (Date.now() - startedAt >= boundedDurationMs) {
+      break;
+    }
+    await sleep(boundedIntervalMs);
+  }
+
+  return samples;
+}
+
+async function runBackgroundModeLoop(tabId: number, generation: number): Promise<void> {
+  try {
+    while (generation === backgroundLoopGeneration) {
+      const state = await getBackgroundModeState();
+      if (!state.enabled || state.tabId !== tabId) {
+        break;
+      }
+
+      const sample = await captureBackgroundProbe(tabId);
+      await appendBackgroundProbeSample(sample);
+      await requestBackgroundScan(tabId);
+
+      if (!sample.ok) {
+        const tabStillExists = await chrome.tabs.get(tabId).then(
+          () => true,
+          () => false
+        );
+        if (!tabStillExists) {
+          await storeBackgroundModeState({ enabled: false });
+          break;
+        }
+      }
+
+      await sleep(BACKGROUND_MODE_INTERVAL_MS);
+    }
+  } finally {
+    if (generation === backgroundLoopGeneration && backgroundLoopTabId === tabId) {
+      backgroundLoopTabId = null;
+    }
+  }
+}
+
+function ensureBackgroundModeLoop(tabId: number): void {
+  if (backgroundLoopTabId === tabId) return;
+
+  const generation = ++backgroundLoopGeneration;
+  backgroundLoopTabId = tabId;
+  void runBackgroundModeLoop(tabId, generation);
+}
+
+function stopBackgroundModeLoop(): void {
+  backgroundLoopGeneration += 1;
+  backgroundLoopTabId = null;
+}
+
+async function setBackgroundMode(
+  enabled: boolean,
+  sender: chrome.runtime.MessageSender
+): Promise<BackgroundModeState> {
+  if (!enabled) {
+    stopBackgroundModeLoop();
+    const state: BackgroundModeState = { enabled: false };
+    await storeBackgroundModeState(state);
+    return state;
+  }
+
+  const tabId = sender.tab?.id;
+  const url = sender.tab?.url ?? "";
+  if (tabId === undefined || !isChatGptUrl(url)) {
+    throw new Error("Background Mode must be enabled from a ChatGPT tab.");
+  }
+
+  const state: BackgroundModeState = {
+    enabled: true,
+    tabId,
+    url,
+    startedAt: new Date().toISOString()
+  };
+  await storeBackgroundModeState(state);
+  await storeBackgroundProbeSamples([]);
+  ensureBackgroundModeLoop(tabId);
+  return state;
+}
+
+async function getBackgroundModeStateForSender(
+  sender: chrome.runtime.MessageSender
+): Promise<BackgroundModeState> {
+  const state = await getBackgroundModeState();
+  if (!state.enabled) return state;
+
+  return {
+    ...state,
+    enabled: state.tabId !== undefined && state.tabId === sender.tab?.id
+  };
+}
+
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
   void (async () => {
     try {
@@ -147,6 +584,40 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
           sendResponse({ ok: true });
           return;
         }
+        case "GET_BACKGROUND_PROBE_SAMPLES":
+          sendResponse(await getBackgroundProbeSamples());
+          return;
+        case "RUN_BACKGROUND_PROBE": {
+          const tabId = _sender.tab?.id;
+          if (tabId === undefined) {
+            sendResponse({
+              ok: false,
+              code: "NO_SENDER_TAB",
+              message: "Background probe must be armed from a ChatGPT tab."
+            });
+            return;
+          }
+
+          const samples = await runBackgroundProbeSeries(
+            tabId,
+            message.durationMs ?? 30_000,
+            message.intervalMs ?? 1_000
+          );
+          sendResponse({ ok: true, tabId, samples: samples.length });
+          return;
+        }
+        case "GET_BACKGROUND_MODE_STATE":
+          sendResponse(await getBackgroundModeStateForSender(_sender));
+          return;
+        case "SET_BACKGROUND_MODE":
+          sendResponse(await setBackgroundMode(message.enabled, _sender));
+          return;
+        case "ACTIVATE_CHATGPT_SUBMIT_MAIN_WORLD":
+          sendResponse(await activateChatGptSubmitMainWorld(_sender));
+          return;
+        case "ACTIVATE_CHATGPT_SUBMIT_WITH_FOCUS":
+          sendResponse(await activateChatGptSubmitWithFocus(_sender));
+          return;
         case "PREPARE_TOOL_CALL":
           sendResponse(
             await prepareToolCall(
@@ -186,3 +657,19 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
 
   return true;
 });
+
+void (async () => {
+  const state = await getBackgroundModeState();
+  if (!state.enabled || state.tabId === undefined) return;
+
+  try {
+    const tab = await chrome.tabs.get(state.tabId);
+    if (isChatGptUrl(tab.url ?? "")) {
+      ensureBackgroundModeLoop(state.tabId);
+    } else {
+      await storeBackgroundModeState({ enabled: false });
+    }
+  } catch {
+    await storeBackgroundModeState({ enabled: false });
+  }
+})();
